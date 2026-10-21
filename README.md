@@ -146,8 +146,10 @@ SQL/
 
 nyc_taxi_pipeline/          # Projet dbt Core
 reports/                    # Analyses et graphiques
-streamlit_dashboard.py      # Dashboard web connecté à Snowflake
-streamlit_dashboard_local.py# Dashboard web connecté à DuckDB (fichiers locaux)
+streamlit_dashboard_local.py# Dashboard web (DuckDB sur les Parquet)
+nyc_dashboard.py            # Rendu du dashboard, partagé
+nyc_content.py              # Onglets À propos et Pipeline de données
+nyc_theme.py                # Thème visuel et composants
 tasks.py                    # Commandes Invoke
 ```
 

@@ -21,7 +21,7 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "rich>=14.2.0",
     "snowflake>=1.8.0",
-    "streamlit>=1.50.0",
+    "streamlit>=1.66.0",
 ]
 
 [dependency-groups]

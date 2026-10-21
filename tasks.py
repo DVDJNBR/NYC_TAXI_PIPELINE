@@ -152,7 +152,7 @@ def dashboard(c):
     """Lancer le dashboard Streamlit interactif"""
     console.print("🚀 Dashboard Streamlit interactif...", style="blue")
     console.print("🌐 Ouverture automatique: http://localhost:8501", style="cyan")
-    c.run("streamlit run streamlit_dashboard.py", pty=True)
+    c.run("streamlit run streamlit_dashboard_local.py", pty=True)
 
 @task
 def jupyter_dashboard(c):

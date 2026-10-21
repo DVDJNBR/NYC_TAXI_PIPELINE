@@ -1,7 +1,7 @@
 # Dépendances minimales pour streamlit_dashboard_local.py + le téléchargement des données.
 # Volontairement séparées de pyproject.toml qui contient aussi dbt-core, dbt-snowflake,
 # jupyter, matplotlib... inutiles ici et lourds sur un VPS à l'espace disque limité.
-streamlit>=1.50.0
+streamlit>=1.66.0
 duckdb>=1.5.1
 pandas>=2.3.3
 plotly>=6.3.1

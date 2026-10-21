@@ -1,5 +1,54 @@
+# Source de vérité de la palette.
+#
+# Streamlit sait tenir deux thèmes complets : les tables [theme.light] et
+# [theme.dark] acceptent chacune 48 des options de [theme]. Le front applique
+# le bon jeu de couleurs côté navigateur, sans aller-retour serveur, et sans
+# `base` ici le thème par défaut suit le réglage système du visiteur.
+#
+# Exige Streamlit >= 1.66. En deçà, ces deux tables sont refusées au
+# démarrage (« "theme.dark" is not a valid config option ») et Streamlit
+# applique ses propres préréglages : le fond devient #0e1117 au lieu de
+# #101014, et les widgets natifs ne sont plus d'accord avec notre palette.
+#
+# nyc_theme.py relit ce fichier au démarrage (tomllib) et en déduit sa palette
+# Python : les couleurs ne sont donc écrites qu'une fois, ici. Les noms sont
+# ceux de Streamlit ; la correspondance avec nos noms métier (ACCENT, RULE…)
+# est faite dans nyc_theme._MAP.
+#
+# borderColor est donné en hexadécimal et non en rgba() : Streamlit n'accepte
+# pas la notation fonctionnelle. Les valeurs ci-dessous sont les anciens
+# rgba(255,255,255,0.12) et rgba(0,0,0,0.14) aplatis sur le fond de page.
+
 [theme]
-primaryColor = "#2563EB"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F8FAFC"
-textColor = "#0F172A"
+baseRadius = "small"
+buttonRadius = "small"
+showWidgetBorder = true
+
+[theme.dark]
+primaryColor             = "#d9a441"
+backgroundColor          = "#101014"
+secondaryBackgroundColor = "#16161c"
+codeBackgroundColor      = "#1c1c23"
+textColor                = "#e8e6e3"
+grayColor                = "#8b8794"
+greenColor               = "#5f9e6e"
+redColor                 = "#b5634f"
+borderColor              = "#2d2d30"
+grayBackgroundColor      = "#3a3845"
+chartCategoricalColors   = ["#d9a441", "#8b8794", "#5f9e6e", "#b5634f", "#3a3845"]
+
+[theme.light]
+primaryColor             = "#a9741a"
+backgroundColor          = "#ffffff"
+secondaryBackgroundColor = "#f5f5f3"
+codeBackgroundColor      = "#ededea"
+textColor                = "#1b1b1f"
+grayColor                = "#6b6773"
+greenColor               = "#3f7d53"
+redColor                 = "#a04a33"
+borderColor              = "#dbdbdb"
+grayBackgroundColor      = "#c9c7d0"
+chartCategoricalColors   = ["#a9741a", "#6b6773", "#3f7d53", "#a04a33", "#c9c7d0"]
+
+[server]
+headless = true
