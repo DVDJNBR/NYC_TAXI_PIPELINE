@@ -1,0 +1,19 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Damier du taxi new-yorkais : la marque la plus reconnaissable du sujet,
+       et la seule qui tienne encore à 16 px. Une silhouette de voiture s'y
+       réduirait à une tache. Dégradé repris de l'accent de l'application. -->
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64">
+      <stop offset="0%" stop-color="#e8bc63"/>
+      <stop offset="100%" stop-color="#a9741a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <!-- Lanterne de toit, posée au-dessus du damier. -->
+  <rect x="23" y="13" width="18" height="8" rx="2" fill="#ffffff"/>
+  <!-- Deux rangées décalées, trois cases chacune. -->
+  <rect x="8"  y="29" width="12" height="12" fill="#ffffff"/>
+  <rect x="32" y="29" width="12" height="12" fill="#ffffff"/>
+  <rect x="20" y="41" width="12" height="12" fill="#ffffff"/>
+  <rect x="44" y="41" width="12" height="12" fill="#ffffff"/>
+</svg>

@@ -23,6 +23,8 @@ depuis `run()`, donc avant les onglets — c'est un contrôle global, pas un
 rerun, l'état actif n'est pas connu côté Python).
 """
 
+import pathlib
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -31,9 +33,14 @@ import streamlit as st
 import nyc_content
 import nyc_theme
 
+# Le logo sert à la fois de favicon et de marque dans la barre. Chemin absolu
+# dérivé du module : l'application est lancée depuis des répertoires de travail
+# différents en local et dans l'image Docker.
+LOGO_PATH = str(pathlib.Path(__file__).resolve().parent / "assets" / "logo-icon.svg")
+
 PAGE_CONFIG = dict(
     page_title="NYC Yellow Taxi",
-    page_icon="🚕",
+    page_icon=LOGO_PATH,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -178,6 +185,7 @@ ZONE_LOOKUP = {
 def run(load_data):
     """Point d'entrée unique. `load_data` est la fonction (mise en cache par
     l'appelant) qui renvoie le tuple (daily, hourly, zones, profile)."""
+    st.logo(LOGO_PATH, size="large")
     nyc_theme.inject_css()
     # Hors de st.sidebar : le CSS épingle ce bouton dans la bannière en
     # position fixe, et une barre repliée est déplacée par un `transform`, qui

@@ -162,14 +162,20 @@ _DUST_IMAGE, _DUST_SIZE, _DUST_REPEAT, _DUST_START, _DUST_END = _dust_field()
 # Pleins phares : au survol de la ligne déjà active, le faisceau gagne en
 # intensité et porte plus loin vers la gauche. Le passage est net et non
 # adouci — des phares basculent d'un coup, ils ne fondent pas.
+# Flaque du clignotant : courte et resserrée, 28 % de la largeur contre 40 à
+# 82 % pour le phare. Un clignotant éclaire ses abords, il n'ouvre pas la
+# route — c'est ce rapport de portée qui empêche de les confondre.
+_BLINK_POOL = ("linear-gradient(to left, "
+               "color-mix(in srgb, var(--nyc-accent) 38%, transparent) 0%, "
+               "color-mix(in srgb, var(--nyc-accent) 15%, transparent) 14%, "
+               "transparent 28%)")
+
 _LIT_HIGH = {
     "dark": ("linear-gradient(to left, "
              "color-mix(in srgb, var(--nyc-accent) 42%, transparent) 0%, "
              "color-mix(in srgb, var(--nyc-accent) 20%, transparent) 48%, "
              "color-mix(in srgb, var(--nyc-accent) 5%, transparent) 82%, "
              "transparent 100%)"),
-    "light": ("linear-gradient(to left, "
-              "color-mix(in srgb, var(--nyc-accent) 26%, transparent) 0 100%)"),
 }
 
 _LIT = {
@@ -335,7 +341,7 @@ def inject_css():
            transparent au repos, pour que rien ne se décale quand il s'allume. */
         [data-testid="stSidebar"] [data-testid="stRadioOption"] {{
             position: relative;
-            padding: 7px 12px;
+            padding: 7px 22px 7px 12px;
             text-align: right;
             border-radius: 5px 0 0 5px;
             transition: background-color 0.18s ease, border-color 0.18s ease,
@@ -348,11 +354,6 @@ def inject_css():
         }}
         /* Au survol, le faisceau effleure sans se poser : même géométrie,
            en neutre et au tiers de l'intensité. */
-        [data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {{
-            background: linear-gradient(to left,
-                color-mix(in srgb, {p['TEXT_LIGHT']} 9%, transparent) 0%,
-                transparent 85%);
-        }}
         [data-testid="stSidebar"] [data-testid="stRadioOption"]:hover p {{
             color: {p['TEXT_LIGHT']};
         }}
@@ -424,7 +425,7 @@ def inject_css():
 
         /* Pleins phares : survoler la ligne active monte l'intensité. */
         [data-testid="stSidebar"] [data-testid="stRadioOption"]:has(input:checked):hover {{
-            background-image: {_LIT_HIGH[mode()]};
+            {f"background-image: {_LIT_HIGH['dark']};" if mode() == "dark" else ""}
         }}
 
         /* Clignotant : survoler une destination où l'on ne va pas encore,
@@ -435,22 +436,34 @@ def inject_css():
            Les transitions occupent 6 % du cycle, soit 41 ms : assez court
            pour qu'une ampoule s'allume, assez long pour éviter la coupure
            franche qui ferait stroboscope. */
+        /* La lumière que l'ampoule projette, sur sa propre couche pour battre
+           avec elle : une couleur de fond ne s'anime pas en cadence. */
+        [data-testid="stSidebar"]
+            [data-testid="stRadioOption"]:not(:has(input:checked)):hover::before {{
+            {"" if mode() == "light" else
+             'content: ""; position: absolute;'
+             ' left: 0; right: 0; top: 50%; height: 18px; margin-top: -9px;'
+             ' pointer-events: none;'
+             f' background-image: {_BLINK_POOL};'
+             ' animation: nyc-blink 0.68s linear infinite;'}
+        }}
+
         [data-testid="stSidebar"]
             [data-testid="stRadioOption"]:not(:has(input:checked)):hover::after {{
             content: {'""' if mode() == "dark" else "none"};
             position: absolute;
             top: 50%; right: 0;
-            width: 3px; height: 14px;
-            margin-top: -7px;
-            border-radius: 2px;
+            width: 5px; height: 18px;
+            margin-top: -9px;
+            border-radius: 2.5px;
             background: {p['ACCENT']};
             /* Une ampoule éclaire ce qui l'entoure. Deux halos concentriques :
                un proche et dense, un large et diffus — c'est la décroissance
                d'une source ponctuelle. La lueur est admise ici parce qu'elle
                a une source ; posée sur une carte, elle ne serait qu'un effet.
                Elle bat avec l'ampoule, puisque l'opacité porte les deux. */
-            box-shadow: 0 0 4px 0 color-mix(in srgb, {p['ACCENT']} 85%, transparent),
-                        0 0 13px 2px color-mix(in srgb, {p['ACCENT']} 45%, transparent);
+            box-shadow: 0 0 5px 0 color-mix(in srgb, {p['ACCENT']} 85%, transparent),
+                        0 0 16px 3px color-mix(in srgb, {p['ACCENT']} 45%, transparent);
             animation: nyc-blink 0.68s linear infinite;
         }}
         @keyframes nyc-blink {{
@@ -488,6 +501,22 @@ def inject_css():
             animation: nyc-arrow 0.2s ease-out;
         }}
 
+        /* La plaque garde sa flèche, en blanc, après le mot et pointée vers
+           lui : sur un panneau elle indique la direction à prendre, pas le
+           sens de lecture. */
+        [data-testid="stSidebar"] [data-testid="stRadioOption"]:has(input:checked)
+            [data-testid="stMarkdownContainer"] p::after {{
+            content: {'none' if mode() == "dark" else '""'};
+            display: inline-block;
+            width: 20px; height: 10px;
+            margin-left: 10px;
+            vertical-align: 0.08em;
+            transform: scaleX(-1);
+            background-color: {_SIGN_INK};
+            -webkit-mask: {_SIGN_ARROW_MASK};
+            mask: {_SIGN_ARROW_MASK};
+        }}
+
         @keyframes nyc-arrow {{
             from {{ opacity: 0; transform: scaleX(-1) translateX(-7px); }}
             to   {{ opacity: 1; transform: scaleX(-1) translateX(0); }}
@@ -504,13 +533,31 @@ def inject_css():
              ' box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08);'}
         }}
 
+        /* Au survol, le mot prend la typographie du panneau — capitales et
+           interlettrage — sans son fond. C'est l'aperçu de ce que donnera la
+           sélection : le même langage à deux intensités, et le changement de
+           chasse fournit le mouvement.
+
+           L'essai concurrent, une peinture verte balayant depuis la droite,
+           a été écarté : le vert passait sous le texte noir, qui devenait
+           illisible sur la moitié peinte. Faire basculer l'encre en blanc à
+           l'avancée de la peinture demanderait de dupliquer le texte en deux
+           calques masqués. */
+        [data-testid="stSidebar"]
+            [data-testid="stRadioOption"]:not(:has(input:checked)):hover p {{
+            {"" if mode() == "dark" else
+             "text-transform: uppercase; letter-spacing: 0.07em;"
+             " font-size: 0.84rem; font-weight: 600;"}
+        }}
+
         /* La plaque ne fait pas toute la largeur : elle est à la taille de son
            texte, comme une vraie plaque de rue. C'est le conteneur interne
            qui la porte, et non la ligne entière, sinon l'aplat s'étirerait
            jusqu'au bord de la barre. */
         [data-testid="stSidebar"] [data-testid="stRadioOption"]:has(input:checked) > div {{
             {"" if mode() == "dark" else
-             f'display: inline-flex; width: auto; padding: 5px 18px;'
+             f'display: inline-flex; width: auto; padding: 7px 30px;'
+             f' margin-right: -14px;'
              f' flex-direction: row; align-items: center; white-space: nowrap;'
              f' background-image: {_METAL_BAND}, {_METAL_BAND}, {_SIGN_FACE};'
              ' background-size: 100% 3px, 100% 3px, 100% 100%;'

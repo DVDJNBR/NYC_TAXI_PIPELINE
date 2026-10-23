@@ -9,6 +9,7 @@ COPY streamlit_dashboard_local.py .
 COPY nyc_theme.py nyc_content.py nyc_dashboard.py .
 COPY scripts/B_load_local_parquet.py scripts/B_load_local_parquet.py
 COPY .streamlit/ .streamlit/
+COPY assets/ assets/
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
