@@ -747,7 +747,9 @@ def inject_css():
         .st-key-band::before {{
             order: 1;
             content: "";
-            width: 1.75rem; height: 1.75rem;
+            /* La marque tient seule contre le titre, sans barre latérale pour
+               l'encadrer : à 1,75 rem elle passait pour une puce. */
+            width: 2.2rem; height: 2.2rem;
             background: {_LOGO_URI} center / contain no-repeat;
         }}
         .st-key-band::after {{
@@ -784,19 +786,72 @@ def inject_css():
         }}
         .st-key-band iframe {{ display: block; width: 72px !important; }}
 
-        /* Sélecteur de langue : trois intitulés, pas de pastilles. Le même
-           gris que le reste du bandeau, l'actif en plein, les autres en
-           retrait — une commande qui ne se dispute pas la lecture avec le
-           titre à côté. */
-        .st-key-band [data-testid="stRadioGroup"] {{
-            flex-direction: row !important;
-            gap: 0.5rem !important;
-            align-items: center;
+        /* Sélecteur de langue : un menu déroulant, pas trois intitulés en
+           ligne. Trois codes de deux lettres côte à côte ne se lisaient pas
+           comme une commande — rien ne disait qu'ils étaient cliquables, et
+           les deux langues qu'on ne parle pas occupaient autant de place que
+           celle qu'on lit. Au repos il ne reste que la langue courante et un
+           chevron ; le reste se déplie au survol ou au clavier.
+
+           Le widget reste un `st.radio` : l'état est unique et porté par lui,
+           là où un `st.selectbox` apporterait son propre menu, impossible à
+           loger dans un bandeau en position fixe sans le reconstruire. */
+        .st-key-band_lang {{
+            position: relative;
+            /* Largeur réservée : la liste dépliée est en position absolue,
+               le bandeau ne doit pas se réorganiser quand elle s'ouvre. */
+            width: 2.6rem; height: 1.1rem;
+        }}
+        .st-key-band_lang [data-testid="stRadioGroup"] {{
+            position: absolute;
+            top: -0.3rem; left: -0.4rem;
+            /* Un bloc absolu se dimensionne sur son conteneur : à 2,6 rem,
+               « FR » se coupait entre le F et le R. */
+            width: max-content;
+            flex-direction: column !important;
+            gap: 0.18rem !important;
+            align-items: flex-start;
+            padding: 0.3rem 0.4rem;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            z-index: 5;
+        }}
+        /* Repliée, la liste ne montre que la langue courante. */
+        .st-key-band_lang [data-testid="stRadioOption"]:not(:has(input:checked)) {{
+            display: none;
+        }}
+        /* `!important` : la règle qui replie la liste porte un `:not(:has())`,
+           plus spécifique que celle-ci, et gagnerait sans cela. */
+        .st-key-band_lang:hover [data-testid="stRadioOption"],
+        .st-key-band_lang:focus-within [data-testid="stRadioOption"] {{
+            display: block !important;
+        }}
+        .st-key-band_lang:hover [data-testid="stRadioGroup"],
+        .st-key-band_lang:focus-within [data-testid="stRadioGroup"] {{
+            background: {p['BG_PANEL']};
+            border-color: {p['RULE']};
+            box-shadow: 0 6px 16px rgba(0,0,0,{0.35 if mode() == "dark" else 0.12});
+        }}
+        /* Le chevron dit que l'on peut cliquer. Il disparaît une fois la
+           liste ouverte : elle se montre alors elle-même. */
+        .st-key-band_lang [data-testid="stRadioOption"]:has(input:checked) p::after {{
+            /* Le chevron en clair et non en échappement CSS : ce bloc est
+               une f-string Python, où "\25" est lu comme un octal avant même
+               d'arriver au navigateur. */
+            content: "▾";
+            margin-left: 0.3rem;
+            font-size: 0.62rem;
+            opacity: 0.7;
+        }}
+        .st-key-band_lang:hover [data-testid="stRadioOption"]:has(input:checked) p::after,
+        .st-key-band_lang:focus-within [data-testid="stRadioOption"]:has(input:checked) p::after {{
+            content: none;
         }}
         .st-key-band [data-testid="stRadioOption"] > div > div:first-child {{
             display: none !important;
         }}
         .st-key-band [data-testid="stRadioOption"] p {{
+            white-space: nowrap;
             font-size: 0.6875rem !important;
             font-weight: 600 !important;
             letter-spacing: 0.08em;
@@ -845,6 +900,32 @@ def inject_css():
             transition: opacity 0.18s ease;
         }}
         .st-key-navbar [data-testid="stRadioOption"]:hover p {{ opacity: 0.82; }}
+        /* La flèche de signalisation, reprise de l'ancienne barre : elle
+           apparaît après le mot, pointée vers lui, et s'insère dans le flux
+           — c'est elle qui pousse le libellé, et ce décalage fait le
+           mouvement. L'onglet actif la garde, si bien que rien ne saute en
+           passant de l'un à l'autre.
+
+           Masque et non glyphe : le caractère d'une police est un trait fin,
+           là où une flèche de panneau a un fût épais et une tête pleine. */
+        .st-key-navbar [data-testid="stRadioOption"]:hover
+            [data-testid="stMarkdownContainer"] p::after,
+        .st-key-navbar [data-testid="stRadioOption"]:has(input:checked)
+            [data-testid="stMarkdownContainer"] p::after {{
+            content: "";
+            display: inline-block;
+            width: 17px; height: 9px;
+            margin-left: 9px;
+            vertical-align: 0.06em;
+            transform: scaleX(-1);
+            background-color: currentColor;
+            -webkit-mask: {_SIGN_ARROW_MASK};
+            mask: {_SIGN_ARROW_MASK};
+        }}
+        .st-key-navbar [data-testid="stRadioOption"]:not(:has(input:checked)):hover
+            [data-testid="stMarkdownContainer"] p::after {{
+            animation: nyc-arrow 0.2s ease-out;
+        }}
         .st-key-navbar [data-testid="stRadioOption"]:has(input:checked) p {{
             opacity: 1;
             color: {p['ACCENT']} !important;

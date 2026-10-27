@@ -41,6 +41,7 @@ des données embarquées repasseraient par la connexion à chaque clic.
 
 import json
 import pathlib
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -57,6 +58,24 @@ ZONE_CYCLE = ROOT / "data" / "aggregates" / "zone_cycle.parquet"
 OD_CYCLE = ROOT / "data" / "aggregates" / "od_cycle.parquet"
 
 CHANNEL = "nyc-cockpit"
+
+
+def _channel() -> str:
+    """Nom du canal, propre à l'onglet.
+
+    Un BroadcastChannel porte au-delà du document : deux onglets ouverts sur
+    l'application se retrouvaient avec deux horloges maîtresses sur le même
+    nom, chacune avançant le pas de l'autre. On voyait le ruban et la carte
+    sauter d'un pas, et le cycle changer tout seul.
+
+    La clé vit dans st.session_state, qui est propre à la session du
+    navigateur : les cinq composants d'une même page partagent donc leur
+    canal, et deux pages ne se parlent pas.
+    """
+    key = "_cockpit_channel"
+    if key not in st.session_state:
+        st.session_state[key] = uuid.uuid4().hex[:8]
+    return f"{CHANNEL}-{st.session_state[key]}"
 
 MEASURES = ["trips", "revenue", "distance"]
 COLUMNS = {"trips": "TOTAL_TRIPS", "revenue": "TOTAL_REVENUE",
@@ -228,7 +247,7 @@ def meta() -> dict:
 def _cfg(**extra) -> str:
     p = nyc_theme.palette()
     return json.dumps({
-        "channel": CHANNEL,
+        "channel": _channel(),
         "mode": nyc_theme.mode(),
         "colors": {
             "bg": p["BG_PAGE"], "ink": p["TEXT_LIGHT"], "dim": p["TEXT_DIM"],
@@ -518,14 +537,13 @@ def _controls_body() -> str:
     return (
         rf"""
 <style>
-  /* Une seule ligne : cycle, mesure, pas courant, lecture. Les deux jeux de
-     boutons commandent la même horloge et se lisent donc d'un seul balayage,
-     à hauteur de la barre qui sépare le haut de page de la carte. */
+  /* Une seule ligne, trois groupes écartés aux extrémités : ce qu'on mesure
+     à gauche, l'horloge au milieu, le pas du cycle à droite. L'écart suffit
+     à les distinguer — ni intitulé « Cycle », ni intitulé « Mesure », qui ne
+     faisaient que nommer ce que les mots disaient déjà. */
   #wrap {{ position: absolute; inset: 0; display: flex; align-items: center;
-          gap: 7px; padding: 0 2px; }}
-  .tag {{ font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase;
-         color: {p['TEXT_DIM']}; flex: 0 0 auto; }}
-  .gap {{ flex: 0 0 22px; }}
+          justify-content: space-between; padding: 0 2px; }}
+  #clock {{ display: flex; align-items: center; gap: 10px; }}
   /* Au repos un bouton n'est que son mot. Pas de cadre, pas de fond : ce qui
      distingue l'actif doit être la seule chose à voir. */
   .sign {{ position: relative; border: 0; background: none; cursor: pointer;
@@ -577,17 +595,17 @@ def _controls_body() -> str:
           animation: none; opacity: 0.55; }} }}
   #play {{ font: inherit; font-size: 0.72rem; cursor: pointer; width: 30px;
           padding: 5px 0; border-radius: 3px; flex: 0 0 30px; }}
-  #now {{ font-size: 1.15rem; font-weight: 600; margin-left: auto;
-         font-variant-numeric: tabular-nums; }}
+  #now {{ font-size: 1.15rem; font-weight: 600;
+         font-variant-numeric: tabular-nums; min-width: 72px;
+         text-align: right; }}
 </style>
 <div id="wrap">
-  <span class="tag">Cycle</span>
-  <div id="scopes" style="display:flex; gap:4px;"></div>
-  <span class="gap"></span>
-  <span class="tag">Mesure</span>
   <div id="measures" style="display:flex; gap:4px;"></div>
-  <div id="now"></div>
-  <button id="play"></button>
+  <div id="clock">
+    <div id="now"></div>
+    <button id="play"></button>
+  </div>
+  <div id="scopes" style="display:flex; gap:4px;"></div>
 </div>
 """
         + _CONTROLS_JS
