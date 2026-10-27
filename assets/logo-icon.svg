@@ -1,19 +1,28 @@
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <!-- Damier du taxi new-yorkais : la marque la plus reconnaissable du sujet,
-       et la seule qui tienne encore à 16 px. Une silhouette de voiture s'y
-       réduirait à une tache. Dégradé repris de l'accent de l'application. -->
+  <!-- La course d'un taxi sur la grille de Manhattan : deux avenues remontees,
+       une rue traversee, le point d'arrivee. Un taxi n'y roule jamais en
+       diagonale, et cette marche d'escalier est aussi la forme d'une courbe en
+       escalier — la famille de graphique qui dit « une valeur tient jusqu'au
+       prochain changement ». Les deux lectures sont le meme trace.
+
+       Le cadre n'est pas un rectangle arrondi mais une superellipse
+       x^4 + y^4 = r^4, echantillonnee sur 128 points : la courbure y monte
+       sans sauter au raccord, la ou un border-radius passe d'un coup de 0 a
+       1/r. Virages du trace au rayon 4 px, soit un peu moins que l'epaisseur
+       du trait. -->
   <defs>
-    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64">
-      <stop offset="0%" stop-color="#e8bc63"/>
-      <stop offset="100%" stop-color="#a9741a"/>
-    </linearGradient>
+    <clipPath id="cadre"><path d="M 62.00 32.00 L 61.98 38.65 L 61.93 41.39 L 61.84 43.49 L 61.71 45.25 L 61.55 46.79 L 61.35 48.16 L 61.11 49.41 L 60.84 50.56 L 60.52 51.62 L 60.17 52.60 L 59.78 53.51 L 59.36 54.36 L 58.89 55.15 L 58.38 55.89 L 57.82 56.58 L 57.23 57.23 L 56.58 57.82 L 55.89 58.38 L 55.15 58.89 L 54.36 59.36 L 53.51 59.78 L 52.60 60.17 L 51.62 60.52 L 50.56 60.84 L 49.41 61.11 L 48.16 61.35 L 46.79 61.55 L 45.25 61.71 L 43.49 61.84 L 41.39 61.93 L 38.65 61.98 L 32.00 62.00 L 25.35 61.98 L 22.61 61.93 L 20.51 61.84 L 18.75 61.71 L 17.21 61.55 L 15.84 61.35 L 14.59 61.11 L 13.44 60.84 L 12.38 60.52 L 11.40 60.17 L 10.49 59.78 L 9.64 59.36 L 8.85 58.89 L 8.11 58.38 L 7.42 57.82 L 6.77 57.23 L 6.18 56.58 L 5.62 55.89 L 5.11 55.15 L 4.64 54.36 L 4.22 53.51 L 3.83 52.60 L 3.48 51.62 L 3.16 50.56 L 2.89 49.41 L 2.65 48.16 L 2.45 46.79 L 2.29 45.25 L 2.16 43.49 L 2.07 41.39 L 2.02 38.65 L 2.00 32.00 L 2.02 25.35 L 2.07 22.61 L 2.16 20.51 L 2.29 18.75 L 2.45 17.21 L 2.65 15.84 L 2.89 14.59 L 3.16 13.44 L 3.48 12.38 L 3.83 11.40 L 4.22 10.49 L 4.64 9.64 L 5.11 8.85 L 5.62 8.11 L 6.18 7.42 L 6.77 6.77 L 7.42 6.18 L 8.11 5.62 L 8.85 5.11 L 9.64 4.64 L 10.49 4.22 L 11.40 3.83 L 12.38 3.48 L 13.44 3.16 L 14.59 2.89 L 15.84 2.65 L 17.21 2.45 L 18.75 2.29 L 20.51 2.16 L 22.61 2.07 L 25.35 2.02 L 32.00 2.00 L 38.65 2.02 L 41.39 2.07 L 43.49 2.16 L 45.25 2.29 L 46.79 2.45 L 48.16 2.65 L 49.41 2.89 L 50.56 3.16 L 51.62 3.48 L 52.60 3.83 L 53.51 4.22 L 54.36 4.64 L 55.15 5.11 L 55.89 5.62 L 56.58 6.18 L 57.23 6.77 L 57.82 7.42 L 58.38 8.11 L 58.89 8.85 L 59.36 9.64 L 59.78 10.49 L 60.17 11.40 L 60.52 12.38 L 60.84 13.44 L 61.11 14.59 L 61.35 15.84 L 61.55 17.21 L 61.71 18.75 L 61.84 20.51 L 61.93 22.61 L 61.98 25.35 L 62.00 32.00 Z"/></clipPath>
   </defs>
-  <rect width="64" height="64" rx="16" fill="url(#g)"/>
-  <!-- Lanterne de toit, posée au-dessus du damier. -->
-  <rect x="23" y="13" width="18" height="8" rx="2" fill="#ffffff"/>
-  <!-- Deux rangées décalées, trois cases chacune. -->
-  <rect x="8"  y="29" width="12" height="12" fill="#ffffff"/>
-  <rect x="32" y="29" width="12" height="12" fill="#ffffff"/>
-  <rect x="20" y="41" width="12" height="12" fill="#ffffff"/>
-  <rect x="44" y="41" width="12" height="12" fill="#ffffff"/>
+  <path d="M 62.00 32.00 L 61.98 38.65 L 61.93 41.39 L 61.84 43.49 L 61.71 45.25 L 61.55 46.79 L 61.35 48.16 L 61.11 49.41 L 60.84 50.56 L 60.52 51.62 L 60.17 52.60 L 59.78 53.51 L 59.36 54.36 L 58.89 55.15 L 58.38 55.89 L 57.82 56.58 L 57.23 57.23 L 56.58 57.82 L 55.89 58.38 L 55.15 58.89 L 54.36 59.36 L 53.51 59.78 L 52.60 60.17 L 51.62 60.52 L 50.56 60.84 L 49.41 61.11 L 48.16 61.35 L 46.79 61.55 L 45.25 61.71 L 43.49 61.84 L 41.39 61.93 L 38.65 61.98 L 32.00 62.00 L 25.35 61.98 L 22.61 61.93 L 20.51 61.84 L 18.75 61.71 L 17.21 61.55 L 15.84 61.35 L 14.59 61.11 L 13.44 60.84 L 12.38 60.52 L 11.40 60.17 L 10.49 59.78 L 9.64 59.36 L 8.85 58.89 L 8.11 58.38 L 7.42 57.82 L 6.77 57.23 L 6.18 56.58 L 5.62 55.89 L 5.11 55.15 L 4.64 54.36 L 4.22 53.51 L 3.83 52.60 L 3.48 51.62 L 3.16 50.56 L 2.89 49.41 L 2.65 48.16 L 2.45 46.79 L 2.29 45.25 L 2.16 43.49 L 2.07 41.39 L 2.02 38.65 L 2.00 32.00 L 2.02 25.35 L 2.07 22.61 L 2.16 20.51 L 2.29 18.75 L 2.45 17.21 L 2.65 15.84 L 2.89 14.59 L 3.16 13.44 L 3.48 12.38 L 3.83 11.40 L 4.22 10.49 L 4.64 9.64 L 5.11 8.85 L 5.62 8.11 L 6.18 7.42 L 6.77 6.77 L 7.42 6.18 L 8.11 5.62 L 8.85 5.11 L 9.64 4.64 L 10.49 4.22 L 11.40 3.83 L 12.38 3.48 L 13.44 3.16 L 14.59 2.89 L 15.84 2.65 L 17.21 2.45 L 18.75 2.29 L 20.51 2.16 L 22.61 2.07 L 25.35 2.02 L 32.00 2.00 L 38.65 2.02 L 41.39 2.07 L 43.49 2.16 L 45.25 2.29 L 46.79 2.45 L 48.16 2.65 L 49.41 2.89 L 50.56 3.16 L 51.62 3.48 L 52.60 3.83 L 53.51 4.22 L 54.36 4.64 L 55.15 5.11 L 55.89 5.62 L 56.58 6.18 L 57.23 6.77 L 57.82 7.42 L 58.38 8.11 L 58.89 8.85 L 59.36 9.64 L 59.78 10.49 L 60.17 11.40 L 60.52 12.38 L 60.84 13.44 L 61.11 14.59 L 61.35 15.84 L 61.55 17.21 L 61.71 18.75 L 61.84 20.51 L 61.93 22.61 L 61.98 25.35 L 62.00 32.00 Z" fill="#d9a441"/>
+  <g clip-path="url(#cadre)">
+    <rect x="14" y="2" width="1.4" height="60" fill="#17171b" opacity="0.22"/>
+    <rect x="26" y="2" width="1.4" height="60" fill="#17171b" opacity="0.22"/>
+    <rect x="38" y="2" width="1.4" height="60" fill="#17171b" opacity="0.22"/>
+    <rect x="50" y="2" width="1.4" height="60" fill="#17171b" opacity="0.22"/>
+    <rect x="2" y="16" width="60" height="1.4" fill="#17171b" opacity="0.22"/>
+    <rect x="2" y="30" width="60" height="1.4" fill="#17171b" opacity="0.22"/>
+    <rect x="2" y="44" width="60" height="1.4" fill="#17171b" opacity="0.22"/>
+    <path d="M 10 52 H 22 A 4 4 0 0 0 26 48 V 34 A 4 4 0 0 1 30 30 H 40 A 4 4 0 0 0 44 26 V 17" fill="none" stroke="#17171b" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="44" cy="16" r="6" fill="#17171b"/>
+  </g>
 </svg>
