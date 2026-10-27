@@ -208,7 +208,15 @@ __marimo__/
 
 
 /repo_guillaume
-data/
+# `data/*` et non `data/` : Git refuse de ré-inclure un fichier dont un
+# répertoire parent est exclu, et le référentiel des zones TLC doit suivre le
+# dépôt. Ce n'est pas de la donnée de courses mais une table de
+# correspondance de 16 ko dont le code a besoin pour nommer les quartiers,
+# y compris dans l'image Docker.
+data/*
+!data/reference/
+data/reference/*
+!data/reference/*.csv
 BRIEF/
 
 ASSETS/.vscode/
