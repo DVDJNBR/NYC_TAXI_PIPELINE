@@ -253,6 +253,37 @@ def palette() -> dict:
     return _load(mode())
 
 
+def materials() -> dict:
+    """Les matières de la navigation, prêtes à servir hors de Streamlit.
+
+    La barre latérale et les boutons du cockpit commandent la même chose et
+    doivent donc se ressembler : tôle verte et joncs chromés de jour, chrome
+    et faisceau ambré de nuit. Les recettes vivent ici en constantes privées ;
+    cette fonction les expose pour les composants, qui vivent dans des iframes
+    et n'héritent ni de la feuille de style ni des variables CSS de la page.
+
+    `var(--nyc-accent)` est donc résolu en clair : la variable n'existe pas de
+    l'autre côté de la frontière de document.
+    """
+    p = palette()
+    m = mode()
+    accent = p["ACCENT"]
+    resolve = lambda css: css.replace("var(--nyc-accent)", accent)
+    return {
+        "mode": m,
+        "metal_band": _METAL_BAND,
+        "sign_face": _SIGN_FACE,
+        "sign_ink": _SIGN_INK,
+        "metal": _METAL[m],
+        "lit": resolve(_LIT[m]),
+        "lit_high": resolve(_LIT_HIGH.get(m, _LIT[m])),
+        "blink_pool": resolve(_BLINK_POOL),
+        "dust": {"image": _DUST_IMAGE, "size": _DUST_SIZE,
+                 "repeat": _DUST_REPEAT, "start": _DUST_START,
+                 "end": _DUST_END},
+    }
+
+
 def _band_ink() -> str:
     """Gris du bandeau : titre et icônes du commutateur, même valeur.
 
@@ -603,7 +634,7 @@ def inject_css():
            cinquième option. Séparés par un filet et un blanc, rendus d'un
            cran plus petits : ce sont des pages de contexte, pas la raison
            d'être du site. nth-child doit rester accordé à N_PRIMARY. */
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(6) {{
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(2) {{
             margin-top: 22px;
             padding-top: 16px;
             /* Marquage au sol : traits longs, intervalles longs, dans la
@@ -616,11 +647,11 @@ def inject_css():
             background-position: left top;
             background-repeat: no-repeat;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+6)
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+2)
             [data-testid="stRadioOption"] {{
             padding-top: 5px; padding-bottom: 5px;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+6)
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+2)
             [data-testid="stRadioOption"] p {{
             /* Un cran plus petit encore que le reste du second groupe : la
                barre est à sa largeur minimale (200 px) et « Pipeline de

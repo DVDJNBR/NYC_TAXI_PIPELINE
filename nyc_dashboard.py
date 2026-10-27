@@ -8,19 +8,15 @@ est isolée du rendu.
 
 Structure de l'interface :
 
-    [sidebar]          À propos | Pipeline de données | Dashboard (par défaut)
-     Section
-      Combien ?
-      Quand ?
-      Où ?
-      Comment ?
+    [sidebar]   Dashboard (par défaut)
+                ---
+                À propos
+                Pipeline de données
 
-Les trois sections du dashboard sont dans la sidebar et non dans un second rang
-d'onglets : Streamlit ne sait pas rendre `st.tabs` verticalement, et empiler
-deux rangées horizontales alourdissait le haut de page. La sidebar est écrite
-depuis `run()`, donc avant les onglets — c'est un contrôle global, pas un
-élément d'un onglet (`st.tabs` exécute de toute façon les trois corps à chaque
-rerun, l'état actif n'est pas connu côté Python).
+Le dashboard est une grille unique — le cockpit — et non plus quatre sections
+à parcourir. La barre ne porte donc qu'une entrée principale, suivie des deux
+pages de contexte. Elle est écrite depuis `run()`, avant le corps de la page :
+c'est un contrôle global.
 """
 
 import pathlib
@@ -32,7 +28,6 @@ import nyc_content
 import nyc_lang
 import nyc_cockpit
 import nyc_theme
-import nyc_views
 
 # Le logo sert à la fois de favicon et de marque dans la barre. Chemin absolu
 # dérivé du module : l'application est lancée depuis des répertoires de travail
@@ -60,21 +55,18 @@ PAGE_ABOUT    = "about"
 PAGE_PIPELINE = "pipeline"
 
 
-# Le dashboard est découpé en questions plutôt qu'en catégories : court,
-# mémorisable, et traduisible sans perte (How much / When / Where / How).
-SEC_HOW_MUCH = "how_much"
-SEC_WHEN     = "when"
-SEC_WHERE    = "where"
-SEC_HOW      = "how"
-SECTIONS = [SEC_HOW_MUCH, SEC_WHEN, SEC_WHERE, SEC_HOW]
-
-# Une seule liste pour la barre : les sections du dashboard en tête, les pages
-# de contexte en dessous. Le CSS distingue les deux groupes en visant les
-# options au-delà de la quatrième — d'où N_PRIMARY, qui doit rester accordé.
-VIEWS = [PAGE_COCKPIT] + SECTIONS + [PAGE_ABOUT, PAGE_PIPELINE]
-N_PRIMARY = len(SECTIONS) + 1
-# "Quand ?" est la section la plus riche : c'est elle qui ouvre.
-DEFAULT_SECTION = SEC_WHEN
+# Une seule liste pour la barre : le cockpit, puis les pages de contexte. Le
+# CSS distingue les deux groupes en visant les options au-delà de la première
+# — d'où N_PRIMARY, qui doit rester accordé.
+#
+# Les quatre sections ont quitté la navigation : le cockpit les a remplacées.
+# Elles posaient seize figures côte à côte, chacune répondant à sa question
+# dans son coin ; le cockpit en pose quatre qui répondent ensemble, au même
+# pas de la même journée. Leur code reste dans nyc_views, il n'est plus
+# atteignable depuis la barre.
+VIEWS = [PAGE_COCKPIT, PAGE_ABOUT, PAGE_PIPELINE]
+N_PRIMARY = 1
+DEFAULT_SECTION = PAGE_COCKPIT
 
 # ---------------------------------------------------------------------------
 # Interface
@@ -96,10 +88,7 @@ def run(load_data):
     daily, hourly, zones, profile, congestion, split, payment = _load(load_data)
     view = _sidebar()
 
-    if view == PAGE_COCKPIT:
-        _scope_strip(daily)
-        nyc_cockpit.render(daily, split, zones, profile)
-    elif view == PAGE_ABOUT:
+    if view == PAGE_ABOUT:
         st.title("NYC Yellow Taxi")
         nyc_content.render_about_tab()
     elif view == PAGE_PIPELINE:
@@ -107,16 +96,7 @@ def run(load_data):
         nyc_content.render_pipeline_tab()
     else:
         _scope_strip(daily)
-        if view == SEC_HOW_MUCH:
-            nyc_views.how_much(daily, split, _cross("od_borough"), congestion)
-        elif view == SEC_WHEN:
-            nyc_views.when(daily, _cross("hour_weekday"))
-        elif view == SEC_WHERE:
-            nyc_views.where(zones, _cross("od_borough"),
-                            _cross("dropoff_zones"), _cross("airport_monthly"))
-        else:
-            nyc_views.how(profile, _cross("distance_bins"), payment,
-                          _cross("passengers"))
+        nyc_cockpit.render()
 
     st.markdown("---")
     st.caption("Source : NYC Taxi & Limousine Commission (TLC) — Yellow Taxi Trip Records")
@@ -161,7 +141,7 @@ def _cross(name):
 
 
 def _sidebar():
-    """Les quatre sections du dashboard, puis les deux pages de contexte.
+    """Le dashboard, puis les deux pages de contexte.
 
     Un seul `st.radio` et non deux listes empilées : deux widgets porteraient
     deux sélections indépendantes, et il faudrait arbitrer laquelle a changé

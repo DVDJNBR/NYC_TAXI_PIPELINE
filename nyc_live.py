@@ -89,8 +89,15 @@ def available() -> bool:
     return GEO.exists() and ZONE_CYCLE.exists() and OD_CYCLE.exists()
 
 
+# Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
+# changement de structure ne serait pas vu tant que les agrégats ne sont pas
+# reconstruits, et le composant lirait un fichier à l'ancien format.
+PAYLOAD_VERSION = 2
+
+
 @st.cache_data(show_spinner=False)
-def _build(geo_mtime: float, zone_mtime: float, od_mtime: float) -> dict:
+def _build(version: int, geo_mtime: float, zone_mtime: float,
+           od_mtime: float) -> dict:
     """Écrit les fichiers statiques et rend un résumé.
 
     Les dates de modification sont des arguments et non des lectures
@@ -126,6 +133,7 @@ def _build(geo_mtime: float, zone_mtime: float, od_mtime: float) -> dict:
     meta = {
         "zones": [
             {"id": z, "name": geo[z]["name"], "borough": geo[z]["borough"],
+             "lon": geo[z]["lon"], "lat": geo[z]["lat"],
              "polygon": _outer_ring(geo[z]["geometry"])}
             for z in kept
         ],
@@ -195,8 +203,8 @@ def _outer_ring(geometry: dict) -> list:
 
 
 def meta() -> dict:
-    return _build(GEO.stat().st_mtime, ZONE_CYCLE.stat().st_mtime,
-                  OD_CYCLE.stat().st_mtime)
+    return _build(PAYLOAD_VERSION, GEO.stat().st_mtime,
+                  ZONE_CYCLE.stat().st_mtime, OD_CYCLE.stat().st_mtime)
 
 
 # ---------------------------------------------------------------------------
@@ -220,33 +228,57 @@ def _html(body: str, cfg: str) -> str:
     return _SHELL.replace("__CFG__", cfg).replace("__BODY__", body)
 
 
-def controls(height: int = 88, scope: str = "hour",
+def _head(title: str, hint: str = "", **extra) -> dict:
+    return {"title": title, "hint": hint, **extra}
+
+
+def controls(height: int = 160, scope: str = "hour",
              measure: str = "trips") -> None:
     """Les boutons-panneaux et l'horloge du cockpit."""
     meta()
     components.html(
-        _html(_CONTROLS, _cfg(scope=scope, measure=measure)),
+        _html(_controls_body(), _cfg(scope=scope, measure=measure)),
         height=height, scrolling=False,
     )
 
 
-def city_map(height: int = 460, pitch: int = 52) -> None:
+def kpis(height: int = 160) -> None:
+    """Quatre nombres qui suivent le pas de l'horloge."""
+    meta()
+    components.html(_html(_KPIS, _cfg()), height=height, scrolling=False)
+
+
+# Cadrage de la carte. Il dépend du format du bloc autant que de la ville :
+# le cockpit donne à la carte trois colonnes sur cinq, soit un cadre presque
+# carré, là où un bandeau large tiendrait la baie de New York entière. Les
+# valeurs sont ici et non dans le JavaScript pour pouvoir être reprises si la
+# grille change de proportions.
+VIEW = {"longitude": -73.945, "latitude": 40.728, "zoom": 10.0, "bearing": -18}
+
+
+def city_map(height: int = 460, pitch: int = 50, title: str = "",
+             hint: str = "") -> None:
     """La carte à pics. Hauteur et couleur suivent la mesure du pas."""
     meta()
-    components.html(_html(_MAP, _cfg(pitch=pitch)), height=height,
-                    scrolling=False)
+    # Le titre est blanc : il se pose sur le fond de nuit de la carte, qui ne
+    # suit pas le thème de la page.
+    head = _head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
+    components.html(_html(_MAP, _cfg(view={**VIEW, "pitch": pitch}, head=head)),
+                    height=height, scrolling=False)
 
 
-def profile(height: int = 240) -> None:
+def profile(height: int = 240, title: str = "", hint: str = "") -> None:
     """Le ruban de barres qui défile vers la gauche."""
     meta()
-    components.html(_html(_PROFILE, _cfg()), height=height, scrolling=False)
+    components.html(_html(_PROFILE, _cfg(head=_head(title, hint))),
+                    height=height, scrolling=False)
 
 
-def flows(height: int = 300) -> None:
+def flows(height: int = 300, title: str = "", hint: str = "") -> None:
     """Les flux entre arrondissements, nœuds figés, rubans animés."""
     meta()
-    components.html(_html(_FLOWS, _cfg()), height=height, scrolling=False)
+    components.html(_html(_FLOWS, _cfg(head=_head(title, hint))),
+                    height=height, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +297,18 @@ _SHELL = r"""
          border-radius: 4px; font-size: 0.76rem; line-height: 1.45;
          opacity: 0; transition: opacity 0.12s; white-space: nowrap;
          z-index: 9; }
+  /* Le titre de chaque bloc vit dans son iframe et non dans la page : les
+     hauteurs d'iframe sont fixes, et un titre posé par Streamlit au-dessus
+     ajouterait une marge différente selon le bloc, donc deux colonnes qui ne
+     s'alignent plus. Posé en surimpression, il ne prend aucune place dans la
+     mise en page et laisse le dessin occuper toute la surface. */
+  #head { position: absolute; left: 0; top: 0; right: 0; z-index: 8;
+          pointer-events: none; line-height: 1.3; }
+  #head b { display: block; font-size: 0.88rem; font-weight: 600; }
+  #head i { display: block; font-size: 0.72rem; font-style: normal; }
 </style>
 <div id="load">…</div>
+<div id="head"></div>
 <div id="tip"></div>
 <script>
 const CFG = __CFG__;
@@ -274,6 +316,19 @@ const C = CFG.colors;
 document.body.style.background = C.bg;
 document.body.style.color = C.ink;
 document.getElementById("load").style.color = C.dim;
+
+/* Hauteur réservée au titre, que chaque composant retire de sa surface utile. */
+const HEAD = CFG.head && CFG.head.title ? 34 : 0;
+(function () {
+  const h = document.getElementById("head");
+  if (!HEAD) { h.remove(); return; }
+  h.innerHTML = "<b>" + CFG.head.title + "</b>"
+              + (CFG.head.hint ? "<i>" + CFG.head.hint + "</i>" : "");
+  h.querySelector("b").style.color = CFG.head.ink || C.ink;
+  const hint = h.querySelector("i");
+  if (hint) { hint.style.color = CFG.head.dim || C.dim; }
+})();
+
 const TIP = document.getElementById("tip");
 TIP.style.background = C.panel;
 TIP.style.border = "1px solid " + C.rule;
@@ -398,57 +453,130 @@ __BODY__
 # ---------------------------------------------------------------------------
 # Composant 1 — les boutons-panneaux, et l'horloge
 # ---------------------------------------------------------------------------
-_CONTROLS = r"""
+def _controls_body() -> str:
+    """Les boutons du cockpit, dans la matière de la navigation latérale.
+
+    Ils commandent ce que la barre commandait : autant qu'ils se lisent
+    pareil. Un seul bouton par rangée porte la matière — plaque de rue de
+    jour, cerclage chromé et faisceau de nuit — et les autres restent du
+    texte. Trois boutons en panneau vert côte à côte ne désignent plus rien :
+    c'est le contraste qui dit lequel est actif, pas la décoration.
+
+    Le changement de chasse fait le survol : le mot passe en capitales
+    espacées, soit l'aperçu de la typographie qu'aura la plaque. De nuit il
+    s'y ajoute le clignotant — une destination où l'on n'est pas encore.
+    """
+    m = nyc_theme.materials()
+    dark = m["mode"] == "dark"
+    p = nyc_theme.palette()
+    accent = p["ACCENT"]
+
+    def beam(near, mid, far):
+        """Faisceau vertical : il monte du jonc chromé vers le libellé."""
+        return (f"linear-gradient(to top,"
+                f" color-mix(in srgb, {accent} {near}%, transparent) 0%,"
+                f" color-mix(in srgb, {accent} {mid}%, transparent) 46%,"
+                f" color-mix(in srgb, {accent} {far}%, transparent) 78%,"
+                f" transparent 100%)")
+
+    # De jour la plaque porte sa propre matière : joncs chromés sertis en haut
+    # et en bas, tôle verte entre les deux. De nuit il n'y a pas de plaque,
+    # mais un phare : le faisceau sous le mot et le cerclage qui le projette.
+    on_face = (f"background-image: {beam(26, 9, 3)};" if dark else
+               f"background-image: {m['metal_band']}, {m['metal_band']},"
+               f" {m['sign_face']};"
+               " background-size: 100% 3px, 100% 3px, 100% 100%;"
+               " background-position: top left, bottom left, center;"
+               " background-repeat: no-repeat;")
+    on_ink = accent if dark else m["sign_ink"]
+
+    return (
+        rf"""
 <style>
-  #wrap { position: absolute; inset: 0; display: flex; align-items: center;
-          gap: 26px; padding: 0 2px; }
-  .set { display: flex; gap: 7px; }
-  /* Panneau de direction : tôle verte, jonc chromé en haut et en bas, texte
-     blanc en capitales espacées. La même matière que la navigation. */
-  .sign { position: relative; border: 0; cursor: pointer; padding: 7px 15px;
-          font: inherit; font-size: 0.72rem; font-weight: 600;
-          letter-spacing: 0.1em; text-transform: uppercase;
-          color: rgba(244,246,244,0.62); border-radius: 2px;
-          background: linear-gradient(152deg,#0a7049 0%,#00603f 46%,#004c32 100%);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.14),
-                      0 1px 2px rgba(0,0,0,0.30);
-          transition: color 0.18s, transform 0.18s; }
-  .sign::before, .sign::after { content: ""; position: absolute; left: 0;
-          right: 0; height: 2px;
-          background: linear-gradient(to bottom,#8d8d97 0%,#e8e8f0 42%,
-                                      #a2a2ac 62%,#6e6e78 100%); }
-  .sign::before { top: 0; } .sign::after { bottom: 0; }
-  .sign:hover { color: rgba(244,246,244,0.9); }
-  .sign.on { color: #f4f6f4; }
-  /* Phare : le halo du pas courant, posé derrière le libellé. */
-  .sign.on .glow { opacity: 1; }
-  .glow { position: absolute; inset: 2px 0; opacity: 0; pointer-events: none;
-          background: radial-gradient(ellipse at center,
-                      rgba(255,246,214,0.42) 0%, rgba(255,246,214,0) 72%);
-          transition: opacity 0.25s; }
-  .lab { position: relative; }
-  #play { font: inherit; font-size: 0.78rem; cursor: pointer; width: 34px;
-          padding: 6px 0; border-radius: 3px; }
-  #now { font-size: 0.95rem; font-weight: 600; min-width: 112px;
-         font-variant-numeric: tabular-nums; }
-  #title { font-size: 0.68rem; letter-spacing: 0.09em; text-transform: uppercase; }
+  #wrap {{ position: absolute; inset: 0; display: flex; flex-direction: column;
+          justify-content: center; gap: 9px; padding: 0 2px; }}
+  .row {{ display: flex; align-items: center; gap: 4px; }}
+  .tag {{ font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase;
+         color: {p['TEXT_DIM']}; width: 62px; flex: 0 0 62px; }}
+  /* Au repos un bouton n'est que son mot. Pas de cadre, pas de fond : ce qui
+     distingue l'actif doit être la seule chose à voir. */
+  .sign {{ position: relative; border: 0; background: none; cursor: pointer;
+          font: inherit; font-size: 0.8rem; font-weight: 500;
+          padding: 6px 13px; border-radius: 3px; overflow: hidden;
+          color: {p['TEXT_DIM']};
+          transition: color 0.18s ease; }}
+  .sign:hover {{ color: {p['TEXT_LIGHT']};
+                text-transform: uppercase; letter-spacing: 0.07em;
+                font-size: 0.75rem; font-weight: 600; }}
+  .sign.on {{ color: {on_ink}; font-weight: 600;
+             text-transform: uppercase; letter-spacing: 0.07em;
+             font-size: 0.75rem;
+             {on_face} }}
+  .sign.on:hover {{ color: {on_ink};
+                   {f"background-image: {beam(44, 20, 6)};" if dark else ""} }}
+  /* Le cerclage est une pièce et non un trait : une épaisseur, des bouts
+     arrondis, un retrait sur les côtés qui le détache du bord du bouton. */
+  .sign.on::after {{
+      content: {'""' if dark else "none"};
+      position: absolute; left: 3px; right: 3px; bottom: 0; height: 3px;
+      border-radius: 2px; background: {m['metal']};
+      box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08); }}
+  /* Clignotant : survoler une destination où l'on ne va pas encore. Deux
+     couches, la flaque de lumière et l'ampoule, qui battent ensemble à
+     1,5 Hz — la cadence d'un vrai feu. */
+  .sign:not(.on):hover::before {{
+      content: {'""' if dark else "none"};
+      position: absolute; left: 0; right: 0; bottom: 0; height: 16px;
+      pointer-events: none;
+      background-image: linear-gradient(to top,
+          color-mix(in srgb, {accent} 38%, transparent) 0%,
+          color-mix(in srgb, {accent} 15%, transparent) 46%,
+          transparent 100%);
+      animation: blink 0.68s linear infinite; }}
+  .sign:not(.on):hover::after {{
+      content: {'""' if dark else "none"};
+      position: absolute; bottom: 0; left: 50%;
+      width: 18px; height: 4px; margin-left: -9px;
+      border-radius: 2px; background: {accent};
+      box-shadow: 0 0 5px 0 color-mix(in srgb, {accent} 85%, transparent),
+                  0 0 16px 3px color-mix(in srgb, {accent} 45%, transparent);
+      animation: blink 0.68s linear infinite; }}
+  @keyframes blink {{
+      0%, 42% {{ opacity: 1; }}
+      48%, 100% {{ opacity: 0; }} }}
+  @media (prefers-reduced-motion: reduce) {{
+      .sign:not(.on):hover::before, .sign:not(.on):hover::after {{
+          animation: none; opacity: 0.55; }} }}
+  #play {{ font: inherit; font-size: 0.72rem; cursor: pointer; width: 30px;
+          padding: 5px 0; border-radius: 3px; flex: 0 0 30px; }}
+  #now {{ font-size: 1.15rem; font-weight: 600; margin-left: auto;
+         padding-right: 4px; font-variant-numeric: tabular-nums; }}
 </style>
 <div id="wrap">
-  <button id="play">▶</button>
-  <div class="set" id="scopes"></div>
-  <div class="set" id="measures"></div>
-  <div>
-    <div id="title"></div>
+  <div class="row">
+    <span class="tag">Cycle</span>
+    <div class="set" id="scopes" style="display:flex; gap:4px;"></div>
     <div id="now"></div>
   </div>
+  <div class="row">
+    <span class="tag">Mesure</span>
+    <div class="set" id="measures" style="display:flex; gap:4px;"></div>
+    <button id="play" style="margin-left:auto;">▶</button>
+  </div>
 </div>
+"""
+        + _CONTROLS_JS
+    )
+
+
+_CONTROLS_JS = r"""
 <script>
 let timer = null;
 
 function sign(label, active, onclick) {
   const b = document.createElement("button");
   b.className = "sign" + (active ? " on" : "");
-  b.innerHTML = '<span class="glow"></span><span class="lab">' + label + '</span>';
+  b.textContent = label;
   b.onclick = onclick;
   return b;
 }
@@ -468,10 +596,11 @@ function paintButtons() {
       S.measure = m; publish();
     }));
   }
-  document.getElementById("title").textContent = META.cycles[S.scope].title;
-  document.getElementById("title").style.color = C.dim;
+  /* Le pas courant est écrit en clair : le ruban le montre aussi, mais le
+     lire ici évite de chercher quelle barre porte l'accent. */
   document.getElementById("now").textContent =
     META.cycles[S.scope].labels[S.step];
+  document.getElementById("now").style.color = C.accent;
   document.getElementById("play").textContent = S.playing ? "❚❚" : "▶";
 }
 
@@ -514,6 +643,132 @@ channel.addEventListener("message", e => {
 """
 
 # ---------------------------------------------------------------------------
+# Composant 1 bis — les quatre nombres du pas courant
+# ---------------------------------------------------------------------------
+_KPIS = r"""
+<style>
+  #grid { position: absolute; inset: 0; display: grid;
+          grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+          gap: 8px 14px; }
+  .kpi { display: flex; flex-direction: column; justify-content: center;
+         min-width: 0; }
+  .k-lab { font-size: 0.64rem; letter-spacing: 0.09em;
+           text-transform: uppercase; }
+  .k-val { font-size: 1.15rem; font-weight: 600; line-height: 1.25;
+           font-variant-numeric: tabular-nums; white-space: nowrap;
+           overflow: hidden; text-overflow: ellipsis; }
+  .k-sub { font-size: 0.68rem; line-height: 1.3; white-space: nowrap;
+           overflow: hidden; text-overflow: ellipsis; }
+</style>
+<div id="grid"></div>
+<script>
+/* Ces nombres ne sont pas interpolés entre deux pas, à la différence de la
+   carte et du ruban. Un chiffre qui défile en continu ne se lit pas : il
+   devient une texture. Il change donc d'un coup, au pas, et reste stable
+   entre deux. */
+const CELLS = ["trips", "revenue", "distance", "top"];
+const CELL_LABEL = { trips: "Courses", revenue: "Encaissé",
+                     distance: "Distance moyenne", top: "Zone la plus active" };
+
+function boot() {
+  const g = document.getElementById("grid");
+  for (const key of CELLS) {
+    g.insertAdjacentHTML("beforeend",
+      '<div class="kpi" id="c-' + key + '">'
+      + '<div class="k-lab" style="color:' + C.dim + '">'
+      + CELL_LABEL[key] + '</div>'
+      + '<div class="k-val"></div>'
+      + '<div class="k-sub" style="color:' + C.dim + '"></div></div>');
+  }
+  onState();
+}
+
+/* Somme d'une mesure sur toutes les zones, à un pas donné. */
+function cityAt(step, measure) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const a = SERIES[S.scope][measure];
+  let s = 0;
+  for (let z = 0; z < Z; z++) { s += a[z * n + idx]; }
+  return s * META.cycles[S.scope].scales[measure];
+}
+
+/* Distance moyenne de la ville : une moyenne pondérée par les courses, pas
+   une moyenne des moyennes de zones — sans quoi une zone à trois courses
+   compterait autant que Midtown. */
+function cityDistance(step) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const d = SERIES[S.scope].distance, t = SERIES[S.scope].trips;
+  const ds = META.cycles[S.scope].scales.distance;
+  let num = 0, den = 0;
+  for (let z = 0; z < Z; z++) {
+    const trips = t[z * n + idx];
+    num += d[z * n + idx] * ds * trips;
+    den += trips;
+  }
+  return den ? num / den : 0;
+}
+
+function cityValue(step, measure) {
+  return measure === "distance" ? cityDistance(step) : cityAt(step, measure);
+}
+
+/* Moyenne de la mesure sur le cycle entier : c'est elle qui donne son sens au
+   nombre du pas. « 2 273 courses » ne dit rien ; « +38 % sur la journée »
+   situe l'heure dans la journée. */
+const AVG = {};
+function cycleAverage(measure) {
+  const key = S.scope + "/" + measure;
+  if (AVG[key] === undefined) {
+    const n = stepsOf(S.scope);
+    let s = 0;
+    for (let i = 0; i < n; i++) { s += cityValue(i, measure); }
+    AVG[key] = s / n;
+  }
+  return AVG[key];
+}
+
+function topZone(step, measure) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const a = SERIES[S.scope][measure];
+  let best = -1, at = 0;
+  for (let z = 0; z < Z; z++) {
+    const v = a[z * n + idx];
+    if (v > best) { best = v; at = z; }
+  }
+  return { zone: META.zones[at],
+           value: best * META.cycles[S.scope].scales[measure] };
+}
+
+function signed(ratio) {
+  const pct = Math.round((ratio - 1) * 100);
+  return (pct > 0 ? "+" : "") + pct + " %";
+}
+
+function onState() {
+  for (const key of ["trips", "revenue", "distance"]) {
+    const v = cityValue(S.step, key);
+    const avg = cycleAverage(key);
+    const cell = document.getElementById("c-" + key);
+    cell.querySelector(".k-val").textContent = fmt(v, key);
+    cell.querySelector(".k-val").style.color =
+      key === S.measure ? C.accent : C.ink;
+    cell.querySelector(".k-sub").textContent =
+      avg ? signed(v / avg) + " vs moyenne" : "";
+  }
+  const t = topZone(S.step, S.measure);
+  const cell = document.getElementById("c-top");
+  cell.querySelector(".k-val").textContent = t.zone.name;
+  cell.querySelector(".k-val").style.color = C.ink;
+  cell.querySelector(".k-sub").textContent =
+    t.zone.borough + " · " + fmt(t.value, S.measure);
+}
+</script>
+"""
+
+# ---------------------------------------------------------------------------
 # Composant 2 — la carte à pics
 # ---------------------------------------------------------------------------
 _MAP = r"""
@@ -522,22 +777,30 @@ _MAP = r"""
 <script>
 let deckgl = null;
 
-/* La carte garde son fond de nuit dans les deux thèmes. Une ville extrudée
+/* La carte garde son fond de nuit dans les deux thèmes. Une ville en relief
    se lit par ses ombres, et une ombre n'existe pas sur fond blanc : en thème
-   clair, les colonnes basses se confondaient avec le sol et la silhouette de
-   New York disparaissait. Le bloc est assumé comme une fenêtre sur la ville,
-   pas comme une surface de page. */
+   clair, les pics bas se confondaient avec le sol et la silhouette de New
+   York disparaissait. Le bloc est assumé comme une fenêtre sur la ville, pas
+   comme une surface de page. */
 document.body.style.background = "#0b0b0f";
 
-/* Hauteur de la plus haute colonne, en mètres. Chaque mesure est ramenée à
-   son propre maximum : sans quoi la distance moyenne resterait au sol. */
-const TOP_M = 9000;
+/* Des pics de diamètre fixe, et non les zones elles-mêmes extrudées.
+   Extruder une zone fait porter la lecture par sa surface : JFK, qui couvre
+   un morceau de Queens à lui seul, devenait un plateau doré large comme
+   Manhattan entier alors qu'il pèse une fraction de ses courses. La surface
+   n'encode rien, elle ne doit donc rien dire. Un pic de diamètre constant ne
+   laisse plus parler que sa hauteur.
+
+   Le sol garde les contours, à plat : il situe les pics sans les concurrencer. */
+const SPIKE_R = 280;      // rayon d'un pic, en mètres
+const TOP_M = 11000;      // hauteur du plus haut pic, en mètres
 
 /* Le bas de la rampe reste nettement au-dessus du fond : à trois heures du
    matin toutes les zones sont au plus bas, et une couleur basse trop proche
    du noir effacerait la ville au lieu de la montrer éteinte. */
-const RAMP = { a: [58, 54, 67], b: [226, 172, 70] };
-const EDGE = [255, 255, 255, 30];
+const RAMP = { a: [96, 88, 104], b: [240, 186, 74] };
+const GROUND = [38, 36, 44, 255];
+const GROUND_EDGE = [255, 255, 255, 26];
 
 /* Une lumière rasante donne le relief : c'est l'éclairage qui fait lire une
    hauteur, une couleur seule se lit comme une tache. L'effet est construit
@@ -547,8 +810,8 @@ function lighting() {
     return [];
   }
   return [new deck.LightingEffect({
-    amb: new deck.AmbientLight({ color: [255, 248, 232], intensity: 1.05 }),
-    key: new deck.DirectionalLight({ color: [255, 240, 214], intensity: 1.9,
+    amb: new deck.AmbientLight({ color: [255, 248, 232], intensity: 1.1 }),
+    key: new deck.DirectionalLight({ color: [255, 240, 214], intensity: 1.8,
                                      direction: [-1.2, -2.6, -1.8] }),
   })];
 }
@@ -556,15 +819,16 @@ function lighting() {
 function boot() {
   deckgl = new deck.DeckGL({
     container: "map",
-    /* Centré sur Manhattan et non sur le barycentre des cinq
-       arrondissements : c'est là que sont 92 % des prises en charge, et
-       l'inclinaison repousse de toute façon le haut de la carte au loin. */
-    initialViewState: { longitude: -73.96, latitude: 40.735, zoom: 10.45,
-                        pitch: CFG.pitch, bearing: -20 },
+    /* Centré entre Manhattan et le Queens plutôt que sur Manhattan seul :
+       les deux aéroports portent des pics hauts, et les laisser hors cadre
+       ferait disparaître une partie de ce que la carte raconte. */
+    initialViewState: CFG.view,
     controller: true,
     effects: lighting(),
     onHover: info => {
-      if (!info || !info.object) { tipAt(0, 0, null); return; }
+      if (!info || !info.object || info.layer.id !== "spikes") {
+        tipAt(0, 0, null); return;
+      }
       const d = info.object;
       tipAt(info.x, info.y, "<b>" + d.name + "</b><br>" + d.borough + " · "
             + fmt(scaled(d.i, S.step, S.scope, S.measure), S.measure));
@@ -589,30 +853,46 @@ function frame() {
       const b = value(i, S.step + 1, S.scope, S.measure);
       return { ...zone, i: i, v: (a + (b - a) * t) / hi };
     });
-    deckgl.setProps({ layers: [new deck.PolygonLayer({
-      id: "zones", data: rows, extruded: true, filled: true, pickable: true,
-      getPolygon: d => d.polygon,
-      getElevation: d => Math.max(d.v * TOP_M, 30),
-      /* Rampe en puissance : la racine remonte les zones moyennes, qui
-         resteraient autrement indistinctes du fond. */
-      getFillColor: d => {
-        const u = Math.pow(d.v, 0.45);
-        return [RAMP.a[0] + u * (RAMP.b[0] - RAMP.a[0]),
-                RAMP.a[1] + u * (RAMP.b[1] - RAMP.a[1]),
-                RAMP.a[2] + u * (RAMP.b[2] - RAMP.a[2]), 234];
-      },
-      getLineColor: EDGE,
-      lineWidthMinPixels: 0.5,
-      material: { ambient: 0.38, diffuse: 0.78, shininess: 28,
-                  specularColor: [72, 66, 54] },
-      updateTriggers: { getElevation: [S.scope, S.measure, S.step, t],
-                        getFillColor: [S.scope, S.measure, S.step, t] },
-    })] });
+    deckgl.setProps({ layers: [
+      new deck.PolygonLayer({
+        id: "ground", data: META.zones, extruded: false, filled: true,
+        stroked: true, pickable: false,
+        getPolygon: d => d.polygon,
+        getFillColor: GROUND,
+        getLineColor: GROUND_EDGE,
+        lineWidthMinPixels: 0.5,
+      }),
+      new deck.ColumnLayer({
+        id: "spikes", data: rows, extruded: true, pickable: true,
+        /* Six côtés plutôt qu'un cercle : à cette taille à l'écran, un
+           cylindre lisse n'a pas d'arête pour accrocher la lumière rasante
+           et perd son relief. */
+        diskResolution: 6,
+        radius: SPIKE_R,
+        getPosition: d => [d.lon, d.lat],
+        /* Un plancher de 40 m : une zone à zéro course doit rester une
+           pastille au sol, sinon elle disparaît et la ville se troue. */
+        getElevation: d => Math.max(d.v * TOP_M, 40),
+        /* Rampe en puissance : la racine remonte les zones moyennes, qui
+           resteraient autrement indistinctes du sol. */
+        getFillColor: d => {
+          const u = Math.pow(d.v, 0.45);
+          return [RAMP.a[0] + u * (RAMP.b[0] - RAMP.a[0]),
+                  RAMP.a[1] + u * (RAMP.b[1] - RAMP.a[1]),
+                  RAMP.a[2] + u * (RAMP.b[2] - RAMP.a[2]), 245];
+        },
+        material: { ambient: 0.36, diffuse: 0.8, shininess: 30,
+                    specularColor: [72, 66, 54] },
+        updateTriggers: { getElevation: [S.scope, S.measure, S.step, t],
+                          getFillColor: [S.scope, S.measure, S.step, t] },
+      }),
+    ] });
   }
   requestAnimationFrame(frame);
 }
 </script>
 """
+
 
 # ---------------------------------------------------------------------------
 # Composant 3 — le ruban de barres qui défile
@@ -676,8 +956,9 @@ function draw() {
   const pitch = w / span;
   const bw = Math.min(pitch * 0.58, 26);
   /* `top` garde au-dessus des barres de quoi écrire la valeur du pas
-     courant : sans cette réserve, le nombre sort du canvas. */
-  const base = h - 34, top = 34;
+     courant, et laisse passer le titre posé en surimpression : sans cette
+     réserve, le nombre sort du canvas ou se superpose au titre. */
+  const base = h - 34, top = 34 + HEAD;
 
   const scale = META.cycles[S.scope].scales[S.measure];
   ctx.textAlign = "center";
@@ -756,10 +1037,13 @@ function layout() {
   const right = META.boroughs.filter(b => total["t" + b]);
   const w = SVG.clientWidth, h = SVG.clientHeight;
   const pad = 14, gap = 11, nodeW = 11;
+  /* Le titre est en surimpression : les nœuds commencent sous lui, sinon le
+     plus haut des deux côtés passe derrière le texte. */
+  const padTop = pad + HEAD;
   const place = (list, side) => {
     const sum = list.reduce((a, b) => a + total[side + b], 0) || 1;
-    const usable = h - pad * 2 - gap * (list.length - 1);
-    let y = pad;
+    const usable = h - padTop - pad - gap * (list.length - 1);
+    let y = padTop;
     const out = {};
     for (const b of list) {
       const hh = Math.max(8, (total[side + b] / sum) * usable);
