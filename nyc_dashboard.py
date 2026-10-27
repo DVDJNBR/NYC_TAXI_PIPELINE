@@ -30,6 +30,7 @@ import streamlit as st
 
 import nyc_content
 import nyc_lang
+import nyc_cockpit
 import nyc_theme
 import nyc_views
 
@@ -54,6 +55,7 @@ PAGE_CONFIG = dict(
 # valeur à `?vue=` et de clé de traduction (`nav.` + la clé). Un lien partagé
 # reste donc valide quelle que soit la langue de celui qui l'ouvre, et le code
 # ne compare jamais du texte affiché.
+PAGE_COCKPIT  = "cockpit"
 PAGE_ABOUT    = "about"
 PAGE_PIPELINE = "pipeline"
 
@@ -69,8 +71,8 @@ SECTIONS = [SEC_HOW_MUCH, SEC_WHEN, SEC_WHERE, SEC_HOW]
 # Une seule liste pour la barre : les sections du dashboard en tête, les pages
 # de contexte en dessous. Le CSS distingue les deux groupes en visant les
 # options au-delà de la quatrième — d'où N_PRIMARY, qui doit rester accordé.
-VIEWS = SECTIONS + [PAGE_ABOUT, PAGE_PIPELINE]
-N_PRIMARY = len(SECTIONS)
+VIEWS = [PAGE_COCKPIT] + SECTIONS + [PAGE_ABOUT, PAGE_PIPELINE]
+N_PRIMARY = len(SECTIONS) + 1
 # "Quand ?" est la section la plus riche : c'est elle qui ouvre.
 DEFAULT_SECTION = SEC_WHEN
 
@@ -94,7 +96,10 @@ def run(load_data):
     daily, hourly, zones, profile, congestion, split, payment = _load(load_data)
     view = _sidebar()
 
-    if view == PAGE_ABOUT:
+    if view == PAGE_COCKPIT:
+        _scope_strip(daily)
+        nyc_cockpit.render(daily, split, zones, profile)
+    elif view == PAGE_ABOUT:
         st.title("NYC Yellow Taxi")
         nyc_content.render_about_tab()
     elif view == PAGE_PIPELINE:

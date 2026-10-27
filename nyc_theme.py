@@ -603,7 +603,7 @@ def inject_css():
            cinquième option. Séparés par un filet et un blanc, rendus d'un
            cran plus petits : ce sont des pages de contexte, pas la raison
            d'être du site. nth-child doit rester accordé à N_PRIMARY. */
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(5) {{
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(6) {{
             margin-top: 22px;
             padding-top: 16px;
             /* Marquage au sol : traits longs, intervalles longs, dans la
@@ -616,11 +616,11 @@ def inject_css():
             background-position: left top;
             background-repeat: no-repeat;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+5)
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+6)
             [data-testid="stRadioOption"] {{
             padding-top: 5px; padding-bottom: 5px;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+5)
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+6)
             [data-testid="stRadioOption"] p {{
             /* Un cran plus petit encore que le reste du second groupe : la
                barre est à sa largeur minimale (200 px) et « Pipeline de

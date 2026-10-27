@@ -52,3 +52,8 @@ chartCategoricalColors   = ["#a9741a", "#6b6773", "#3f7d53", "#a04a33", "#c9c7d0
 
 [server]
 headless = true
+# Sert le dossier static/ sous /app/static/. La carte y lit son binaire au
+# lieu de le recevoir dans le HTML du composant : Streamlit renvoie ce HTML
+# à chaque réexécution du script, et un mégaoctet de données repasserait
+# alors par la connexion à chaque clic.
+enableStaticServing = true

@@ -217,6 +217,13 @@ data/*
 !data/reference/
 data/reference/*
 !data/reference/*.csv
+# Les contours des zones, convertis une fois depuis le shapefile de la TLC :
+# 343 ko de géométrie stable, dont le cockpit a besoin au démarrage.
+!data/reference/*.json
 BRIEF/
 
 ASSETS/.vscode/
+
+# Fichiers servis au navigateur par les composants du cockpit. Reconstruits
+# au premier affichage depuis data/ : du cache, pas des sources.
+static/
