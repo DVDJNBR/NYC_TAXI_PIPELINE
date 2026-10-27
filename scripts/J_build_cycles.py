@@ -17,7 +17,7 @@ réellement observés pour chaque pas, lu dans daily.parquet.
 Deux tables en sortie, toutes deux lues par les composants du cockpit :
 
     data/aggregates/zone_cycle.parquet   zone x 43 pas x 3 mesures
-    data/aggregates/od_cycle.parquet     flux entre arrondissements x 43 pas
+    data/aggregates/od_cycle.parquet     flux entre secteurs x 43 pas
 
 La distance est stockée en somme et non en moyenne : une moyenne de moyennes
 donnerait le même poids à une zone de trois courses et à Midtown. La division
@@ -32,6 +32,9 @@ import time
 
 import duckdb
 import pandas as pd
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+import nyc_zones  # noqa: E402  (après l'ajout du dépôt au chemin)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "yellow_taxi" / "*.parquet"
@@ -101,25 +104,35 @@ def zone_cycle(con) -> pd.DataFrame:
 
 
 def od_cycle(con) -> pd.DataFrame:
-    """Flux entre arrondissements, par cycle et par pas.
+    """Flux entre secteurs, par cycle et par pas.
+
+    Secteur et non arrondissement : Manhattan est coupé en quatre bandes par
+    nyc_zones, sans quoi 83 % des courses tiendraient dans une seule boucle
+    Manhattan - Manhattan et le diagramme n'aurait rien à montrer.
 
     Les trois cycles sortent d'une seule lecture : la jointure sur le
     référentiel coûte plus cher que le regroupement, autant ne la faire
     qu'une fois et laisser DuckDB produire les trois agrégats ensemble.
     """
     t0 = time.time()
+    # La correspondance zone -> secteur est calculée en Python, depuis la
+    # géométrie. Elle est passée à DuckDB comme une table, ce qui évite un
+    # CASE de 263 branches dans le SQL.
+    sectors = pd.DataFrame(sorted(nyc_zones.areas().items()),
+                           columns=["LocationID", "Area"])
+    sectors = sectors[sectors["Area"].isin(nyc_zones.AREAS)]
+    con.register("sectors", sectors)
+
     selects = []
     for scope, expr in STEPS.items():
         selects.append(f"""
             SELECT '{scope}' AS SCOPE, {expr} AS STEP,
-                   pu.Borough AS PU_BOROUGH, dz.Borough AS DO_BOROUGH,
+                   pu.Area AS PU_AREA, dz.Area AS DO_AREA,
                    count(*) AS TOTAL_TRIPS, sum(total_amount) AS TOTAL_REVENUE
             FROM read_parquet('{RAW}', union_by_name = true) t
-            JOIN read_csv('{LOOKUP}') pu ON pu.LocationID = t.PULocationID
-            JOIN read_csv('{LOOKUP}') dz ON dz.LocationID = t.DOLocationID
+            JOIN sectors pu ON pu.LocationID = t.PULocationID
+            JOIN sectors dz ON dz.LocationID = t.DOLocationID
             WHERE {CLEAN}
-              AND pu.Borough NOT IN ('Unknown', 'N/A')
-              AND dz.Borough NOT IN ('Unknown', 'N/A')
             GROUP BY 1, 2, 3, 4
         """)
     df = con.execute(" UNION ALL ".join(selects)).fetchdf()

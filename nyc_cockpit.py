@@ -81,6 +81,7 @@ def render():
         nyc_live.flows(
             height=H_BOTTOM,
             title="D'où l'on part, où l'on arrive",
-            hint="Courses internes à un arrondissement écartées : à 87 % du "
-                 "total, elles écrasaient tout le reste.",
+            hint="Manhattan coupé en quatre, du sud au nord : à l'échelle de "
+                 "l'arrondissement, 83 % des courses ne bougeaient pas. "
+                 "Trajets internes à un secteur écartés.",
         )

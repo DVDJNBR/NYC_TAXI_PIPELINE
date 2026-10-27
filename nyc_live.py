@@ -126,7 +126,7 @@ def available() -> bool:
 # Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
 # changement de structure ne serait pas vu tant que les agrégats ne sont pas
 # reconstruits, et le composant lirait un fichier à l'ancien format.
-PAYLOAD_VERSION = 2
+PAYLOAD_VERSION = 3
 
 
 @st.cache_data(show_spinner=False)
@@ -174,8 +174,8 @@ def _build(version: int, geo_mtime: float, zone_mtime: float,
         "measures": MEASURES,
         "cycles": {k: {**v, "scales": scales[k]} for k, v in CYCLES.items()},
         "flows": _flows(od),
-        "boroughs": nyc_zones.BOROUGHS,
-        "boroughColors": nyc_zones.BOROUGH_COLORS,
+        "areas": nyc_zones.AREAS,
+        "areaColors": nyc_zones.AREA_COLORS,
     }
     (STATIC / "nyc_live.json").write_text(json.dumps(meta, separators=(",", ":")))
     return {"zones": len(kept),
@@ -197,19 +197,19 @@ def _pack(grid: np.ndarray) -> tuple:
 
 
 def _flows(od: pd.DataFrame) -> dict:
-    """Flux entre arrondissements, en clair : quelques milliers de nombres.
+    """Flux entre secteurs, en clair : quelques milliers de nombres.
 
-    Assez petit pour voyager en JSON. Les flux internes à un arrondissement
-    sont gardés ici — c'est le composant qui décidera de les montrer ou non,
-    et ils servent au total de chaque nœud.
+    Assez petit pour voyager en JSON. Les flux internes à un secteur sont
+    gardés ici — c'est le composant qui décidera de les montrer ou non, et
+    ils servent au total de chaque nœud.
     """
     out = {}
-    valid = set(nyc_zones.BOROUGHS)
-    od = od[od["PU_BOROUGH"].isin(valid) & od["DO_BOROUGH"].isin(valid)]
+    valid = set(nyc_zones.AREAS)
+    od = od[od["PU_AREA"].isin(valid) & od["DO_AREA"].isin(valid)]
     for scope, cycle in CYCLES.items():
         part = od[od["SCOPE"] == scope]
         rows = []
-        for (pu, do), g in part.groupby(["PU_BOROUGH", "DO_BOROUGH"]):
+        for (pu, do), g in part.groupby(["PU_AREA", "DO_AREA"]):
             series = (g.set_index("STEP")["TOTAL_TRIPS"]
                        .reindex(range(cycle["steps"]))
                        .fillna(0.0))
@@ -349,16 +349,22 @@ document.body.style.background = C.bg;
 document.body.style.color = C.ink;
 document.getElementById("load").style.color = C.dim;
 
-/* Hauteur réservée au titre, que chaque composant retire de sa surface utile. */
-const HEAD = CFG.head && CFG.head.title ? 34 : 0;
+/* Hauteur réservée au titre, que chaque composant retire de sa surface utile.
+   Mesurée et non fixée : la phrase d'aide se replie sur deux ou trois lignes
+   selon la largeur du bloc, et une valeur en dur faisait passer le dessin
+   sous le texte dès que le bloc rétrécissait. */
+let HEAD = 0;
+const HEAD_EL = document.getElementById("head");
 (function () {
-  const h = document.getElementById("head");
-  if (!HEAD) { h.remove(); return; }
-  h.innerHTML = "<b>" + CFG.head.title + "</b>"
+  if (!CFG.head || !CFG.head.title) { HEAD_EL.remove(); return; }
+  HEAD_EL.innerHTML = "<b>" + CFG.head.title + "</b>"
               + (CFG.head.hint ? "<i>" + CFG.head.hint + "</i>" : "");
-  h.querySelector("b").style.color = CFG.head.ink || C.ink;
-  const hint = h.querySelector("i");
+  HEAD_EL.querySelector("b").style.color = CFG.head.ink || C.ink;
+  const hint = HEAD_EL.querySelector("i");
   if (hint) { hint.style.color = CFG.head.dim || C.dim; }
+  const measure = () => { HEAD = HEAD_EL.offsetHeight + 8; };
+  measure();
+  window.addEventListener("resize", measure);
 })();
 
 const TIP = document.getElementById("tip");
@@ -1087,8 +1093,9 @@ _FLOWS = r"""
 <script>
 const SVG = document.getElementById("svg");
 const NS = "http://www.w3.org/2000/svg";
-/* Les flux internes à un arrondissement sont écartés : à 87 % du total, ils
-   écraseraient tout le reste en un seul ruban. Le bloc parle des liaisons. */
+/* Les flux internes à un secteur sont écartés : ils ne décrivent aucun
+   déplacement à cette échelle, et le plus gros d'entre eux écraserait tout
+   le reste en un seul ruban. Le bloc parle des liaisons. */
 let NODES = null, LINKS = null;
 
 function boot() {
@@ -1110,8 +1117,8 @@ function layout() {
     total["s" + f.s] = (total["s" + f.s] || 0) + sum;
     total["t" + f.t] = (total["t" + f.t] || 0) + sum;
   }
-  const left = META.boroughs.filter(b => total["s" + b]);
-  const right = META.boroughs.filter(b => total["t" + b]);
+  const left = META.areas.filter(b => total["s" + b]);
+  const right = META.areas.filter(b => total["t" + b]);
   const w = SVG.clientWidth, h = SVG.clientHeight;
   const pad = 14, gap = 11, nodeW = 11;
   /* Le titre est en surimpression : les nœuds commencent sous lui, sinon le
@@ -1135,7 +1142,7 @@ function layout() {
   /* Chaque ruban garde sa place sur le bord du nœud : l'ordre est figé, les
      épaisseurs seules varient, donc rien ne se croise en cours de route. */
   const cursor = {};
-  LINKS.sort((a, b) => META.boroughs.indexOf(a.t) - META.boroughs.indexOf(b.t));
+  LINKS.sort((a, b) => META.areas.indexOf(a.t) - META.areas.indexOf(b.t));
   for (const l of LINKS) {
     l.so = cursor["s" + l.s] = (cursor["s" + l.s] || 0);
     l.to = cursor["t" + l.t] = (cursor["t" + l.t] || 0);
@@ -1156,7 +1163,7 @@ function layout() {
   draw(true);
 }
 
-function hex(b) { return META.boroughColors[b] || C.dim; }
+function hex(b) { return META.areaColors[b] || C.dim; }
 
 function draw(rebuild) {
   if (!NODES) { return; }
