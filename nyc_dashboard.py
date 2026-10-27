@@ -31,6 +31,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import nyc_content
+import nyc_lang
 import nyc_theme
 
 # Le logo sert à la fois de favicon et de marque dans la barre. Chemin absolu
@@ -42,19 +43,27 @@ PAGE_CONFIG = dict(
     page_title="NYC Yellow Taxi",
     page_icon=LOGO_PATH,
     layout="wide",
-    initial_sidebar_state="expanded",
+    # Un entier à la place de "expanded" fixe la largeur de la barre en
+    # pixels (Streamlit 1.66, borné à 200-600) et met l'état sur "auto" :
+    # ouverte sur un écran large, repliée sur un écran étroit. Le visiteur
+    # peut toujours la tirer par son bord ; sa largeur est alors retenue.
+    initial_sidebar_state=320,
 )
 
-PAGE_ABOUT    = "À propos"
-PAGE_PIPELINE = "Pipeline de données"
+# Les vues sont des clés, pas des intitulés : elles servent à la fois de
+# valeur à `?vue=` et de clé de traduction (`nav.` + la clé). Un lien partagé
+# reste donc valide quelle que soit la langue de celui qui l'ouvre, et le code
+# ne compare jamais du texte affiché.
+PAGE_ABOUT    = "about"
+PAGE_PIPELINE = "pipeline"
 
 
 # Le dashboard est découpé en questions plutôt qu'en catégories : court,
 # mémorisable, et traduisible sans perte (How much / When / Where / How).
-SEC_HOW_MUCH = "Combien"
-SEC_WHEN     = "Quand"
-SEC_WHERE    = "Où"
-SEC_HOW      = "Comment"
+SEC_HOW_MUCH = "how_much"
+SEC_WHEN     = "when"
+SEC_WHERE    = "where"
+SEC_HOW      = "how"
 SECTIONS = [SEC_HOW_MUCH, SEC_WHEN, SEC_WHERE, SEC_HOW]
 
 # Une seule liste pour la barre : les sections du dashboard en tête, les pages
@@ -185,13 +194,16 @@ ZONE_LOOKUP = {
 def run(load_data):
     """Point d'entrée unique. `load_data` est la fonction (mise en cache par
     l'appelant) qui renvoie le tuple (daily, hourly, zones, profile)."""
-    st.logo(LOGO_PATH, size="large")
+    # Pas de st.logo() : il ne sait poser la marque qu'au-dessus de la barre
+    # latérale, ou dans le bandeau une fois celle-ci repliée. Le logo est donc
+    # dessiné par nyc_theme, à gauche du titre dans le bandeau, où il reste
+    # dans les deux états. LOGO_PATH sert encore d'icône d'onglet.
     nyc_theme.inject_css()
-    # Hors de st.sidebar : le CSS épingle ce bouton dans la bannière en
+    # Hors de st.sidebar : le CSS épingle le groupe dans la bannière en
     # position fixe, et une barre repliée est déplacée par un `transform`, qui
-    # ferait alors office de bloc conteneur et emporterait le bouton hors de
+    # ferait alors office de bloc conteneur et emporterait le groupe hors de
     # l'écran avec elle.
-    nyc_theme.theme_toggle()
+    nyc_theme.band()
 
     daily, hourly, zones, profile, congestion, split, payment = _load(load_data)
     view = _sidebar()
@@ -248,6 +260,7 @@ def _sidebar():
     with st.sidebar:
         view = st.radio(
             "Vue", VIEWS, index=_index(VIEWS, "vue", DEFAULT_SECTION),
+            format_func=lambda key: nyc_lang.t("nav." + key),
             label_visibility="collapsed", key="nav_view",
         )
         # La bascule de thème recharge la page : sans ce paramètre d'URL,

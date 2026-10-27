@@ -15,13 +15,23 @@ lumineux par connecteur), sans JavaScript ni composant Streamlit custom.
 Mise en forme : deux couleurs, et elles portent du sens. Le rail historique est
 neutre et en pointillés, le rail actif est à l'accent et en trait plein. Pas
 d'icône, pas de dégradé — les étapes sont numérotées.
+
+Aucun texte affiché n'est écrit ici : tout vient de `nyc_lang`, par clé. Ce qui
+reste en dur, ce sont les noms de tables, de colonnes, de fichiers et de
+produits — les traduire ferait mentir le schéma, qui doit nommer ce qui existe
+réellement dans le dépôt. Conséquence : les blocs de contenu sont des fonctions
+et non plus des constantes de module, puisqu'ils dépendent de la langue du
+visiteur et non de l'état du serveur au démarrage.
 """
 import re
 from urllib.parse import quote
 
 import streamlit as st
 
+import nyc_lang
 import nyc_theme as theme
+
+from nyc_lang import t
 
 REPO_URL = "https://github.com/DVDJNBR/NYC_TAXI_PIPELINE"
 
@@ -36,7 +46,10 @@ REPO_URL = "https://github.com/DVDJNBR/NYC_TAXI_PIPELINE"
 # une erreur d'arrondi.
 ROWS_RAW   = 76_977_173
 ROWS_CLEAN = 73_979_119
-PERIOD     = "janvier 2024 – septembre 2025"
+# Les deux bornes citées dans la vignette STAGING : le nombre de courses
+# au-delà du plafond de 100 mi, et la pire d'entre elles.
+OUTLIERS   = 3_700
+MAX_MILES  = 398_000
 
 
 def _html(s: str) -> str:
@@ -45,8 +58,8 @@ def _html(s: str) -> str:
 
 
 def _n(v: int) -> str:
-    """Séparateur de milliers insécable — évite une césure en plein nombre."""
-    return f"{v:,}".replace(",", "&nbsp;")
+    """Entier groupé selon la langue — virgule en anglais, insécable sinon."""
+    return nyc_lang.n(v)
 
 
 # dbt est le seul outil de la pile absent de simple-icons : les slugs dbt,
@@ -72,35 +85,45 @@ TECH_STACK = [
     ("Docker",    "2496ED", "docker",        "white"),
 ]
 
-FINAL_TABLES = [
-    ("daily_summary", "Agrégat",
-     "pickup_date · total_trips · total_revenue · avg_distance · avg_fare · avg_tip_pct"),
-    ("hourly_patterns", "Agrégat",
-     "pickup_hour · total_trips · total_revenue · avg_fare · avg_tip_pct · tranche"),
-    ("zone_analysis", "Agrégat",
-     "pickup_zone · total_trips · total_revenue · avg_fare · popularity_rank"),
-    ("clean_trips", "Staging",
-     "trajets filtrés (0 < distance ≤ 100 mi, montants > 0, microsecondes corrigées)"),
-]
+
+def _final_tables():
+    """Les quatre tables du schéma FINAL. Seuls le genre et la description
+    de `clean_trips` se traduisent : les noms et les colonnes sont ceux du
+    dépôt."""
+    return [
+        ("daily_summary", t("pipe.kind.agg"),
+         "pickup_date · total_trips · total_revenue · avg_distance · avg_fare · avg_tip_pct"),
+        ("hourly_patterns", t("pipe.kind.agg"),
+         "pickup_hour · total_trips · total_revenue · avg_fare · avg_tip_pct · tranche"),
+        ("zone_analysis", t("pipe.kind.agg"),
+         "pickup_zone · total_trips · total_revenue · avg_fare · popularity_rank"),
+        ("clean_trips", t("pipe.kind.staging"), t("pipe.tbl.clean")),
+    ]
 
 
 # ---------------------------------------------------------------------------
 # Onglet "À propos"
 # ---------------------------------------------------------------------------
-PROJECT_FACTS = [
-    ("Projet", "Projet étudiant — pipeline de données bout-en-bout"),
-    ("Objectif", "Éprouver Snowflake et dbt Core sur un volume réaliste"),
-    ("Données", f"{_n(ROWS_RAW)} courses de taxis jaunes new-yorkais<br>"
-                f"<span class='fact-sub'>NYC TLC Open Data · {PERIOD}</span>"),
-    ("Architecture", "RAW → STAGING → FINAL<br>"
-                     "<span class='fact-sub'>modèles dbt versionnés, testés à chaque build</span>"),
-    ("Restitution", "Streamlit + Plotly"),
-]
+def _project_facts():
+    return [
+        (t("about.k.project"), t("about.v.project")),
+        (t("about.k.goal"), t("about.v.goal")),
+        (t("about.k.data"),
+         t("about.v.data", rows=_n(ROWS_RAW)) + "<br>"
+         f"<span class='fact-sub'>"
+         + t("about.v.data_sub", period=t("about.period")) + "</span>"),
+        (t("about.k.arch"),
+         "RAW → STAGING → FINAL<br>"
+         f"<span class='fact-sub'>{t('about.v.arch_sub')}</span>"),
+        (t("about.k.output"), "Streamlit + Plotly"),
+    ]
 
-NEXT_STEPS = [
-    ("Pipeline de données", "le détail de la chaîne, étape par étape"),
-    ("Dashboard", "l'analyse menée sur les tables finales"),
-]
+
+def _next_steps():
+    return [
+        (t("nav.pipeline"), t("about.next.pipeline")),
+        ("Dashboard", t("about.next.dashboard")),
+    ]
 
 
 def render_about_tab():
@@ -124,7 +147,7 @@ def render_about_tab():
     rows = "".join(
         f'<div class="fact-row"><div class="fact-key">{key}</div>'
         f'<div class="fact-val">{value}</div></div>'
-        for key, value in PROJECT_FACTS
+        for key, value in _project_facts()
     )
     st.markdown(_html(f'<div style="max-width:68ch">{rows}</div>'), unsafe_allow_html=True)
 
@@ -143,12 +166,12 @@ def render_about_tab():
     steps = "".join(
         f'<div class="next-row"><span class="next-key">→ {key}</span>'
         f'<span class="next-val">{value}</span></div>'
-        for key, value in NEXT_STEPS
+        for key, value in _next_steps()
     )
     st.markdown(_html(f'<div style="max-width:68ch">{steps}</div>'), unsafe_allow_html=True)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    st.markdown(f"[Code source sur GitHub]({REPO_URL})")
+    st.markdown(f"[{t('about.repo')}]({REPO_URL})")
 
 
 # ---------------------------------------------------------------------------
@@ -166,75 +189,99 @@ _P_SOURCE = """<div class="flow-path">yellow_tripdata_2024-06.parquet</div>
   "total_amount": 27.95
 }</pre>"""
 
-_P_RAW = f"""<div class="flow-path">NYC_TAXI_DB.RAW.yellow_tripdata</div>
-<div class="flow-kv"><span>lignes</span><b>{_n(ROWS_RAW)}</b></div>
-<div class="flow-kv"><span>charge</span><b>COPY INTO</b></div>
-<div class="flow-note">Copié tel quel, horodatages aberrants compris
-(2002 → 2026 dans la source TLC).</div>"""
-
-_P_STAGING = f"""<div class="flow-path">STAGING.clean_trips &middot; dbt Core</div>
-<pre class="flow-json">WHERE trip_distance &gt; 0
-  AND trip_distance &lt;= 100
-  AND total_amount  &gt; 0
-  AND pickup &lt; dropoff</pre>
-<div class="flow-kv"><span>retenues</span><b>{_n(ROWS_CLEAN)}</b></div>
-<div class="flow-note">&minus;{_n(ROWS_RAW - ROWS_CLEAN)} lignes écartées, dont
-3&nbsp;700 courses de plus de 100 mi (jusqu'à 398&nbsp;000 mi : erreurs GPS qui
-doublaient la distance moyenne). + tests dbt_utils.</div>"""
-
 _P_FINAL = """<div class="flow-path">FINAL.daily_summary</div>
 <div class="flow-kv"><span>pickup_date</span><b>2024-06-12</b></div>
 <div class="flow-kv"><span>total_trips</span><b>118&nbsp;402</b></div>
 <div class="flow-kv"><span>avg_fare</span><b>$28.14</b></div>
 <div class="flow-kv"><span>avg_tip_pct</span><b>18.6%</b></div>"""
 
-_P_COPY = """<div class="flow-path">./data/yellow_taxi/*.parquet</div>
-<div class="flow-kv"><span>fichiers</span><b>21</b></div>
-<div class="flow-kv"><span>montage</span><b>bind-mount</b></div>
-<div class="flow-note">Téléchargés une fois par entrypoint.sh.</div>"""
 
-_P_DUCKDB = """<div class="flow-path">Scan en mémoire</div>
+def _p_raw():
+    return f"""<div class="flow-path">NYC_TAXI_DB.RAW.yellow_tripdata</div>
+<div class="flow-kv"><span>{t('pipe.p.raw.rows')}</span><b>{_n(ROWS_RAW)}</b></div>
+<div class="flow-kv"><span>{t('pipe.p.raw.load')}</span><b>COPY INTO</b></div>
+<div class="flow-note">{t('pipe.p.raw.note')}</div>"""
+
+
+def _p_staging():
+    return f"""<div class="flow-path">STAGING.clean_trips &middot; dbt Core</div>
+<pre class="flow-json">WHERE trip_distance &gt; 0
+  AND trip_distance &lt;= 100
+  AND total_amount  &gt; 0
+  AND pickup &lt; dropoff</pre>
+<div class="flow-kv"><span>{t('pipe.p.stg.kept')}</span><b>{_n(ROWS_CLEAN)}</b></div>
+<div class="flow-note">{t('pipe.p.stg.note',
+                          dropped=_n(ROWS_RAW - ROWS_CLEAN),
+                          outliers=_n(OUTLIERS),
+                          max_mi=_n(MAX_MILES))}</div>"""
+
+
+def _p_copy():
+    return f"""<div class="flow-path">./data/yellow_taxi/*.parquet</div>
+<div class="flow-kv"><span>{t('pipe.p.copy.files')}</span><b>21</b></div>
+<div class="flow-kv"><span>{t('pipe.p.copy.mount')}</span><b>bind-mount</b></div>
+<div class="flow-note">{t('pipe.p.copy.note')}</div>"""
+
+
+def _p_duckdb():
+    return f"""<div class="flow-path">{t('pipe.p.duck.title')}</div>
 <pre class="flow-json">read_parquet(
   'data/yellow_taxi/*.parquet'
 )</pre>
-<div class="flow-note">Mêmes requêtes, pas de warehouse.</div>"""
+<div class="flow-note">{t('pipe.p.duck.note')}</div>"""
 
-_P_CACHE = """<div class="flow-path">./data/aggregates/*.parquet</div>
+
+def _p_cache():
+    return f"""<div class="flow-path">./data/aggregates/*.parquet</div>
 <div class="flow-kv"><span>daily</span><b>37 Ko</b></div>
 <div class="flow-kv"><span>hourly</span><b>6 Ko</b></div>
 <div class="flow-kv"><span>zones</span><b>9 Ko</b></div>
-<div class="flow-note">Persisté : un redémarrage ne rescanne pas.</div>"""
+<div class="flow-note">{t('pipe.p.cache.note')}</div>"""
 
-_P_HERE = """<div class="flow-here">Vous êtes ici</div>
+
+def _p_here():
+    return f"""<div class="flow-here">{t('pipe.p.here.badge')}</div>
 <div class="flow-path">streamlit_dashboard_local.py</div>
-<div class="flow-note">Streamlit + Plotly, requêtes mises en cache.</div>"""
+<div class="flow-note">{t('pipe.p.here.note')}</div>"""
 
-_P_OFFLINE = """<div class="flow-path">Dashboard sur Snowflake</div>
+
+def _p_offline():
+    return f"""<div class="flow-path">{t('pipe.p.offline.title')}</div>
 <pre class="flow-json">SELECT pickup_date, total_trips,
        total_revenue, avg_distance
 FROM daily_summary</pre>
-<div class="flow-note">Le dashboard lisait les tables FINAL
-directement dans le warehouse.</div>"""
+<div class="flow-note">{t('pipe.p.offline.note')}</div>"""
 
-# (titre, sous-titre, vignette)
-RAIL_SNOWFLAKE = [
-    ("NYC TLC",   "Open Data",     _P_SOURCE),
-    ("RAW",       "Snowflake",     _P_RAW),
-    ("STAGING",   "dbt Core",      _P_STAGING),
-    ("FINAL",     "Marts agrégés", _P_FINAL),
-    ("Dashboard", "Streamlit",     _P_OFFLINE),
-]
 
-RAIL_DUCKDB = [
-    ("NYC TLC",   "Mêmes Parquet", _P_SOURCE),
-    ("Copie VPS", "Volume Docker", _P_COPY),
-    ("DuckDB",    "read_parquet()", _P_DUCKDB),
-    ("Agrégats",  "Cache disque",  _P_CACHE),
-    ("Dashboard", "Streamlit",     _P_HERE),
-]
+# Nombre d'étages par rail. Les deux en ont autant, et les durées d'animation
+# s'en déduisent — d'où une constante plutôt qu'un len() sur une liste qui
+# n'existe plus qu'au moment du rendu.
+N_STAGES = 5
+
+
+def _rail_snowflake():
+    """(titre, sous-titre, vignette)"""
+    return [
+        ("NYC TLC",   "Open Data",          _P_SOURCE),
+        ("RAW",       "Snowflake",          _p_raw()),
+        ("STAGING",   "dbt Core",           _p_staging()),
+        ("FINAL",     t("pipe.sub.marts"),  _P_FINAL),
+        ("Dashboard", "Streamlit",          _p_offline()),
+    ]
+
+
+def _rail_duckdb():
+    return [
+        ("NYC TLC",                    t("pipe.sub.same_parquet"),  _P_SOURCE),
+        (t("pipe.stage.vps_copy"),     t("pipe.sub.docker_volume"), _p_copy()),
+        ("DuckDB",                     "read_parquet()",            _p_duckdb()),
+        (t("pipe.stage.aggregates"),   t("pipe.sub.disk_cache"),    _p_cache()),
+        ("Dashboard",                  "Streamlit",                 _p_here()),
+    ]
+
 
 # Durée d'un cycle complet : ~1.1 s par étage franchi.
-_CYCLE = round((len(RAIL_SNOWFLAKE) - 1) * 1.1, 2)
+_CYCLE = round((N_STAGES - 1) * 1.1, 2)
 
 _FLOW_CSS = """
 <style>
@@ -348,7 +395,7 @@ def _flow_rail(stages, color, rail_class=""):
 
 
 def _flow_css():
-    slice_pct = 100 / (len(RAIL_SNOWFLAKE) - 1)
+    slice_pct = 100 / (N_STAGES - 1)
     return (
         _FLOW_CSS
         .replace("__T2__", str(round(_CYCLE * 2, 2)))
@@ -366,49 +413,40 @@ def _flow_css():
 def render_pipeline_tab():
     st.markdown(_flow_css(), unsafe_allow_html=True)
 
-    st.header("Circulation de la donnée")
+    st.header(t("pipe.h.flow"))
     st.markdown(_html(f"""
     <p style="color:{theme.TEXT_DIM}; font-size:0.85rem; line-height:1.65;
               max-width:88ch; margin:0 0 22px;">
-      Deux chemins partent de la même source. Le premier est l'architecture conçue pour le
-      projet, aujourd'hui éteinte ; le second alimente réellement les graphiques de l'onglet
-      Dashboard. Les étages logiques sont les mêmes — seul le moteur de calcul change.
-      Le point lumineux indique le sens de circulation ; chaque vignette montre un extrait
-      réel de ce que contient l'étage.
+      {t('pipe.intro')}
     </p>
     """), unsafe_allow_html=True)
 
     st.markdown(_html(f"""
     <div class="rail-box">
       <div class="rail-head">
-        <span class="rail-label" style="color:{theme.NEUTRAL};">Architecture d'origine — Snowflake + dbt Core</span>
-        <span class="rail-badge" style="color:{theme.WORSE};">Warehouse arrêté</span>
+        <span class="rail-label" style="color:{theme.NEUTRAL};">{t('pipe.rail.past')}</span>
+        <span class="rail-badge" style="color:{theme.WORSE};">{t('pipe.rail.past.badge')}</span>
       </div>
-      <div class="flow-wrap">{_flow_rail(RAIL_SNOWFLAKE, theme.NEUTRAL, "rail-past")}</div>
+      <div class="flow-wrap">{_flow_rail(_rail_snowflake(), theme.NEUTRAL, "rail-past")}</div>
     </div>
 
     <div class="rail-box">
       <div class="rail-head">
-        <span class="rail-label" style="color:{theme.ACCENT};">Chemin actif — copie Parquet sur VPS + DuckDB</span>
-        <span class="rail-badge" style="color:{theme.BETTER};">En service</span>
+        <span class="rail-label" style="color:{theme.ACCENT};">{t('pipe.rail.live')}</span>
+        <span class="rail-badge" style="color:{theme.BETTER};">{t('pipe.rail.live.badge')}</span>
       </div>
-      <div class="flow-wrap">{_flow_rail(RAIL_DUCKDB, theme.ACCENT)}</div>
+      <div class="flow-wrap">{_flow_rail(_rail_duckdb(), theme.ACCENT)}</div>
     </div>
     """), unsafe_allow_html=True)
 
     st.markdown(_html(f"""
     <p style="color:{theme.TEXT_DIM}; font-size:0.82rem; line-height:1.65;
               max-width:88ch; margin:0 0 30px;">
-      <b style="color:{theme.TEXT_LIGHT};">Pourquoi deux rails ?</b> Le warehouse Snowflake
-      était facturé à l'usage et n'est plus financé depuis la fin de la formation. Les tables
-      <code>FINAL</code> ont donc été exportées en Parquet et déposées sur un VPS loué.
-      Les étages logiques n'ont pas bougé — ingestion, nettoyage, agrégation, restitution —
-      seul le moteur qui les exécute a changé. Les chiffres du Dashboard sont les mêmes
-      qu'en sortie de warehouse.
+      <b style="color:{theme.TEXT_LIGHT};">{t('pipe.why.title')}</b> {t('pipe.why.body')}
     </p>
     """), unsafe_allow_html=True)
 
-    st.header("Schéma FINAL — tables analytiques")
+    st.header(t("pipe.h.schema"))
     rows = "".join(
         _html(f"""
         <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:14px;
@@ -420,27 +458,27 @@ def render_pipeline_tab():
           <span style="color:{theme.TEXT_DIM}; font-size:0.74rem; font-family:monospace;">{cols}</span>
         </div>
         """)
-        for name, kind, cols in FINAL_TABLES
+        for name, kind, cols in _final_tables()
     )
     st.markdown(_html(f"<div>{rows}</div>"), unsafe_allow_html=True)
 
     st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
-    st.header("Les deux infrastructures")
+    st.header(t("pipe.h.infra"))
     c1, c2 = st.columns(2)
     for col, (title, state, state_color, items) in zip(
         (c1, c2),
         (
-            ("Snowflake + dbt", "Architecture d'origine", theme.NEUTRAL, [
-                "Warehouse <code>NYC_TAXI_WH</code>, DB <code>NYC_TAXI_DB</code>",
-                "Schémas <code>RAW</code> / <code>STAGING</code> / <code>FINAL</code>",
-                "Chargement par <code>COPY INTO</code> depuis les Parquet TLC",
-                "Modèles dbt + tests automatiques (dbt_utils)",
+            ("Snowflake + dbt", t("pipe.infra.past.state"), theme.NEUTRAL, [
+                t("pipe.infra.past.1"),
+                t("pipe.infra.past.2"),
+                t("pipe.infra.past.3"),
+                t("pipe.infra.past.4"),
             ]),
-            ("DuckDB + Docker (VPS)", "En service", theme.BETTER, [
-                "Tables <code>FINAL</code> exportées en Parquet",
-                "Scan direct des fichiers, sans base distante",
-                "Conteneur Docker derrière Caddy (reverse proxy)",
-                "Volume bind-mount, téléchargement au 1ᵉʳ démarrage",
+            ("DuckDB + Docker (VPS)", t("pipe.infra.live.state"), theme.BETTER, [
+                t("pipe.infra.live.1"),
+                t("pipe.infra.live.2"),
+                t("pipe.infra.live.3"),
+                t("pipe.infra.live.4"),
             ]),
         ),
     ):

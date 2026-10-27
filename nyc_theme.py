@@ -26,7 +26,7 @@ Le Python reste nécessaire parce que deux choses ne peuvent pas suivre le thèm
 sans re-rendu : notre HTML sur mesure (cartes, rails du pipeline) et les
 couleurs Plotly, calculées côté serveur. Streamlit 1.50 n'expose aucune
 variable CSS ni attribut de thème dans le DOM — vérifié : zéro custom property
-dans les 7 feuilles de style de la page. D'où `theme_toggle()`, qui recharge.
+dans les 7 feuilles de style de la page. D'où `band()`, qui recharge.
 
 Les noms historiques (DUSK_ORANGE, NIGHT_PURPLE…) sont conservés pour ne pas
 casser les appels existants, mais plusieurs pointent sur le même neutre : les
@@ -41,6 +41,7 @@ thème actif. Corollaire : à l'intérieur de ce fichier il faut passer par
 `__getattr__`.
 """
 import functools
+import base64
 import pathlib
 import random
 import re
@@ -50,7 +51,18 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
+import nyc_lang
+
 _CONFIG = pathlib.Path(__file__).resolve().parent / ".streamlit" / "config.toml"
+
+# Le logo est posé en image de fond du bandeau, donc encodé en data URI.
+# st.logo() ne sait le placer qu'au-dessus de la barre latérale, ou dans le
+# bandeau quand elle est repliée ; ici il doit rester à côté du titre dans
+# les deux cas.
+_LOGO = base64.b64encode(
+    (pathlib.Path(__file__).resolve().parent / "assets" / "logo-icon.svg").read_bytes()
+).decode()
+_LOGO_URI = f"url('data:image/svg+xml;base64,{_LOGO}')"
 
 # Nom métier -> option Streamlit. NEUTRAL et TEXT_DIM tombent volontairement
 # sur la même valeur : le neutre de la palette *est* la couleur du texte
@@ -241,6 +253,18 @@ def palette() -> dict:
     return _load(mode())
 
 
+def _band_ink() -> str:
+    """Gris du bandeau : titre et icônes du commutateur, même valeur.
+
+    Le gris secondaire tel quel passe pour noir sous un titre en capitales —
+    une lettre pleine rend sa couleur, un trait de 2,2 px la dilue. Ramené de
+    15 % vers le fond, le texte retrouve le poids visuel des icônes sans que
+    les deux cessent d'être la même couleur.
+    """
+    p = palette()
+    return f"color-mix(in srgb, {p['TEXT_DIM']} 85%, {p['BG_PAGE']})"
+
+
 def fmt_int(v) -> str:
     """Entier avec espaces insécables — séparateur français, pas la virgule US."""
     return f"{v:,.0f}".replace(",", " ")
@@ -270,7 +294,16 @@ def inject_css():
            constantes de module, écrites avant que la palette soit connue. */
         .stApp {{ --nyc-accent: {p['ACCENT']}; }}
 
-        [data-testid="stHeader"] {{ background: transparent; }}
+        /* Bandeau : fond plein et non plus transparent — le contenu défile
+           dessous, et le groupe de titre posé sur du vide serait traversé
+           par les graphiques. Le bouton de thème l'était déjà.
+
+           Le bandeau ne couvre que la zone de contenu : son bord gauche est
+           celui de la barre latérale. */
+        [data-testid="stHeader"] {{
+            background: {p['BG_PAGE']};
+            border-bottom: 1px solid {p['RULE']};
+        }}
 
         h1 {{ font-size: 1.6rem !important; font-weight: 600 !important;
               letter-spacing: -0.01em; color: {p['TEXT_LIGHT']} !important; }}
@@ -300,6 +333,7 @@ def inject_css():
              " radial-gradient(100% 38% at 50% 106%,"
              " rgba(0, 0, 0, 0.42) 0%, transparent 72%);"}
         }}
+
 
         /* Navigation — une option est un label [data-testid="stRadioOption"]
            qui contient la pastille puis le texte. Les sélecteurs
@@ -632,6 +666,15 @@ def inject_css():
             left: -9999px !important;
             top: 0 !important;
         }}
+        /* Le panneau du menu, lui, ne suit pas son bouton hors du champ : il
+           est rabattu dans la fenêtre et se dessinait en haut à gauche le
+           temps que le commutateur de thème le pilote. Invisible et
+           intraversable, mais toujours rendu — `display: none` le retirerait
+           du flux et le clic programmatique n'aurait plus de cible. */
+        [data-testid="stMainMenuPopover"] {{
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }}
 
         /* Dans le commutateur de thème du menu ☰, Streamlit peint le focus et
            la sélection avec le même aplat, à deux opacités près (0.15 et
@@ -645,19 +688,91 @@ def inject_css():
             outline: 2px solid {p['ACCENT']};
             outline-offset: -2px;
         }}
-        .st-key-theme_btn {{
-            position: fixed !important; top: 0 !important; right: 152px !important;
-            height: 60px !important; width: 72px !important;
-            /* stVerticalBlock empile en colonne : c'est justify-content qui
-               centre verticalement ici, pas align-items. */
-            display: flex !important; flex-direction: column !important;
-            justify-content: center !important; align-items: center !important;
+        /* Groupe de titre : logo, nom, commutateur, dans cet ordre et sur
+           une seule ligne, calés contre la barre latérale.
+
+           Un seul élément porte les trois, donc un seul gap les sépare et
+           rien n'est à recalculer si le nom change. Le logo et le nom sont
+           des pseudo-éléments, remis dans l'ordre par `order` puisque
+           ::after se place sinon après l'iframe du commutateur.
+
+           La position est fixe, mais son abscisse vient de --nyc-band-x, que
+           le composant tient à jour : la barre latérale est redimensionnable
+           à la souris, et une valeur en dur se décrocherait du bord dès le
+           premier glissement. 340px en secours = 320 de barre + 20 de marge,
+           l'état au chargement. */
+        .st-key-band {{
+            position: fixed !important; top: 0 !important;
+            left: var(--nyc-band-x, 340px) !important; right: auto !important;
+            height: 60px !important; width: auto !important;
+            display: flex !important; flex-direction: row !important;
+            align-items: center !important; gap: 0.625rem !important;
             z-index: 1000001 !important;
         }}
-        /* Largeur imposée au conteneur, car l'iframe du composant hérite
-           sinon de la largeur du bloc parent et décale le bouton loin sur la
-           gauche. */
-        .st-key-theme_btn iframe {{ display: block; width: 72px !important; }}
+        .st-key-band::before {{
+            order: 1;
+            content: "";
+            width: 1.75rem; height: 1.75rem;
+            background: {_LOGO_URI} center / contain no-repeat;
+        }}
+        .st-key-band::after {{
+            order: 2;
+            content: "{nyc_lang.t('band.title')}";
+            margin-right: 0.625rem;
+            font-size: 0.8125rem;
+            /* 600 et non 650 : en capitales, un gras appuyé fait lire le gris
+               plus sombre qu'il n'est. */
+            font-weight: 600;
+            letter-spacing: 0.09em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            /* Même gris que les icônes du commutateur, qui le prennent en
+               currentColor : un seul ton pour tout le bandeau. */
+            color: {_band_ink()};
+        }}
+        /* Les deux commandes gardent l'ordre du code — commutateur de thème,
+           puis langues — puisqu'elles partagent la même valeur d'`order` et
+           viennent après les pseudo-éléments. */
+        .st-key-band > * {{ order: 3; }}
+        /* Streamlit donne au conteneur du composant une base de 26 px — la
+           hauteur passée à components.html. L'iframe, elle, fait 72 px de
+           large et débordait sur le sélecteur de langue. Les deux conteneurs
+           sont donc dimensionnés ici : largeur fixe pour l'iframe, contenu
+           pour le reste. */
+        .st-key-band [data-testid="stElementContainer"] {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+        }}
+        .st-key-band [data-testid="stElementContainer"]:has(iframe) {{
+            flex: 0 0 72px !important;
+            width: 72px !important;
+        }}
+        .st-key-band iframe {{ display: block; width: 72px !important; }}
+
+        /* Sélecteur de langue : trois intitulés, pas de pastilles. Le même
+           gris que le reste du bandeau, l'actif en plein, les autres en
+           retrait — une commande qui ne se dispute pas la lecture avec le
+           titre à côté. */
+        .st-key-band [data-testid="stRadioGroup"] {{
+            flex-direction: row !important;
+            gap: 0.5rem !important;
+            align-items: center;
+        }}
+        .st-key-band [data-testid="stRadioOption"] > div > div:first-child {{
+            display: none !important;
+        }}
+        .st-key-band [data-testid="stRadioOption"] p {{
+            font-size: 0.6875rem !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: {_band_ink()} !important;
+            opacity: 0.55;
+        }}
+        .st-key-band [data-testid="stRadioOption"]:hover p {{ opacity: 0.8; }}
+        .st-key-band [data-testid="stRadioOption"]:has(input:checked) p {{
+            opacity: 1;
+        }}
 
         /* Déclencheur de rerun du bouton de thème : présent dans le DOM pour
            rester cliquable depuis le JavaScript, mais hors de la page. */
@@ -743,7 +858,6 @@ function render(v) {
   var dark = v === 'Dark';
   sw.setAttribute('aria-checked', String(dark));
   sw.setAttribute('aria-label', dark ? 'Thème sombre' : 'Thème clair');
-  sw.title = dark ? 'Passer en thème clair' : 'Passer en thème sombre';
 }
 
 // Clic « à la souris ». element.click() produit un évènement de detail 0, que
@@ -756,7 +870,7 @@ function tap(el) {
 }
 
 // Relance le script Python sans recharger la page, via le bouton Streamlit
-// posé hors écran par theme_toggle().
+// posé hors écran par band().
 function rerun() {
   var b = doc().querySelector('.st-key-theme_rerun button');
   if (!b) { return false; }
@@ -845,11 +959,46 @@ try {
   }
   syncIfDrifted();
 } catch (e) {}
+
+// Abscisse du groupe de titre. Le groupe est en position fixe — seul moyen de
+// le sortir du flux de la page pour le poser dans le bandeau — mais son point
+// d'ancrage bouge : la barre latérale se replie, et le visiteur peut la tirer
+// par son bord. Le bandeau, lui, commence toujours au bord de la barre : son
+// abscisse est donc la mesure cherchée, et un ResizeObserver sur lui voit
+// aussi bien le glissement que le repli.
+//
+// Barre ouverte : 20 px de marge, celle que le logo prenait dans la barre.
+// Barre repliée : le bandeau part de 0 et Streamlit y remet son bouton de
+// dépli, large de 28 px contre le bord — le groupe recule à 64 px.
+function placeBand() {
+  try {
+    var d = doc();
+    var h = d.querySelector('[data-testid="stHeader"]');
+    if (!h) { return; }
+    var x = Math.round(h.getBoundingClientRect().left);
+    d.documentElement.style.setProperty('--nyc-band-x', (x + (x > 0 ? 20 : 64)) + 'px');
+  } catch (e) {}
+}
+
+try {
+  placeBand();
+  var band = doc().querySelector('[data-testid="stHeader"]');
+  if (band && window.parent.ResizeObserver) {
+    new window.parent.ResizeObserver(placeBand).observe(band);
+  }
+  window.parent.addEventListener('resize', placeBand);
+} catch (e) {}
 """
 
 
-def theme_toggle():
-    """Bascule clair / sombre. Par défaut : le thème du navigateur.
+def band():
+    """Le groupe de la barre de titre : logo, nom, thème, langue.
+
+    Le logo et le nom sont des pseudo-éléments posés par `inject_css()` sur le
+    conteneur rendu ici ; seules les deux commandes sont des widgets.
+
+    La bascule de thème, elle, est clair / sombre, et par défaut le thème du
+    navigateur.
 
     Double le sélecteur natif du menu ☰, qui propose depuis la 1.66 les trois
     états System / Light / Dark. Le menu reste la référence : ce bouton ne fait
@@ -895,13 +1044,14 @@ def theme_toggle():
 
     p = palette()
     css = f"""
-        html, body {{ margin:0; padding:0; background:transparent; }}
+        html, body {{ margin:0; padding:0; background:transparent; height:100%; }}
         /* Rail coulissant encadré des deux icônes, repris de qlt-eau-FR-24 :
            14 px d'icône, 6 px de marge, rail de 32x16. Là-bas c'est un
            st.toggle natif ; ici il faut un interrupteur à nous, parce que le
            clic doit passer par le commutateur de thème de Streamlit et non
            par un rerun Python. */
-        #g {{ display: inline-flex; align-items: center; color: {p['TEXT_DIM']}; }}
+        #g {{ display: flex; align-items: center; height: 100%;
+              color: {_band_ink()}; }}
         .ic {{ display: block; line-height: 0; }}
         .ic.s {{ margin-right: 6px; }}
         .ic.m {{ margin-left: 6px; }}
@@ -936,9 +1086,10 @@ def theme_toggle():
     # Fond que ce rendu-ci utilise : la référence contre laquelle le composant
     # détecte qu'un changement de thème n'a pas été suivi d'un rerun.
     js = f'var SERVER_BG = "{_rgb(palette()["BG_PAGE"])}";' + _TOGGLE_JS
-    # Conteneur à clé : produit la classe st-key-theme_btn, sur laquelle le
-    # CSS accroche la position fixe qui remonte le bouton dans la bannière.
-    with st.container(key="theme_btn"):
+    # Conteneur à clé : produit la classe st-key-band, sur laquelle le CSS
+    # accroche la position fixe qui pose le groupe dans la bannière, ainsi que
+    # le logo et le titre en pseudo-éléments.
+    with st.container(key="band"):
         components.html(
             (
             f'<style>{css}</style>'
@@ -950,6 +1101,31 @@ def theme_toggle():
         ),
             height=26,
         )
+        _lang_picker()
+
+
+def _lang_picker():
+    """Trois intitulés de langue, dont un seul est actif.
+
+    Un `st.radio` et non trois boutons : l'état est unique et porté par le
+    widget, là où trois boutons demanderaient d'arbitrer lequel a été cliqué
+    en dernier. Les pastilles sont masquées en CSS — une case cochée est un
+    formulaire, pas une commande de bandeau.
+
+    L'écriture dans `?lang=` suffirait à relancer le script, mais le `rerun`
+    explicite évite de dépendre de ce détail d'implémentation. Pas de boucle :
+    au tour suivant, `current()` renvoie la langue qu'on vient d'écrire et la
+    condition est fausse.
+    """
+    choice = st.radio(
+        "Langue", nyc_lang.LANGS,
+        index=nyc_lang.LANGS.index(nyc_lang.current()),
+        format_func=str.upper, horizontal=True,
+        label_visibility="collapsed", key="band_lang",
+    )
+    if choice != nyc_lang.current():
+        st.query_params["lang"] = choice
+        st.rerun()
 
 
 def sparkline(values, color=None, height=22):
