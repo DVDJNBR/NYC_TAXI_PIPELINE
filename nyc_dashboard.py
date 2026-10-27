@@ -43,10 +43,11 @@ PAGE_CONFIG = dict(
     page_icon=LOGO_PATH,
     layout="wide",
     # Un entier à la place de "expanded" fixe la largeur de la barre en
-    # pixels (Streamlit 1.66, borné à 200-600) et met l'état sur "auto" :
+    # pixels (Streamlit 1.66, borné à 200-600 — 200 est le minimum) et met
+    # l'état sur "auto" :
     # ouverte sur un écran large, repliée sur un écran étroit. Le visiteur
     # peut toujours la tirer par son bord ; sa largeur est alors retenue.
-    initial_sidebar_state=320,
+    initial_sidebar_state=200,
 )
 
 # Les vues sont des clés, pas des intitulés : elles servent à la fois de

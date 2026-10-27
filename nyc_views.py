@@ -180,11 +180,6 @@ def how_much(daily, split, od, congestion):
                        "le reste est pourboire, taxes et péages")
 
     # -- 1. Waterfall de la composition du prix ----------------------------
-    _title(
-        "Le prix affiché n'est pas le prix payé",
-        "Du compteur au montant débité, chaque marche est une ligne de facturation "
-        "distincte. Le compteur ne fait que les deux tiers du total.",
-    )
     parts = [
         ("Compteur", r["FARE"]),
         ("Pourboire", r["TIP"]),
@@ -197,6 +192,15 @@ def how_much(daily, split, od, congestion):
         ("Surcharge amélioration", r["IMPROVEMENT"]),
     ]
     parts = [(k, v) for k, v in parts if v and v > 0]
+
+    _title(
+        "Répartition de la somme totale payée",
+        "À lire de gauche à droite : chaque marche ajoute une ligne de facturation "
+        "au prix de la course précédente, jusqu'au montant débité. Le compteur pose "
+        f"${r['FARE'] / trips:.2f}, les {len(parts) - 1} lignes suivantes en ajoutent "
+        f"${(r['TOTAL'] - r['FARE']) / trips:.2f} — un tiers du total que le tarif "
+        "affiché ne laisse pas voir.",
+    )
 
     fig = go.Figure(go.Waterfall(
         orientation="v",

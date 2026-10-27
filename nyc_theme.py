@@ -622,7 +622,11 @@ def inject_css():
         }}
         [data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-child(n+5)
             [data-testid="stRadioOption"] p {{
-            font-size: 0.82rem;
+            /* Un cran plus petit encore que le reste du second groupe : la
+               barre est à sa largeur minimale (200 px) et « Pipeline de
+               données » doit y tenir sur une ligne sans la déborder. */
+            font-size: 0.72rem;
+            white-space: nowrap;
         }}
 
 
