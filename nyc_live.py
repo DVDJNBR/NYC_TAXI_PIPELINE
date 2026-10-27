@@ -68,16 +68,31 @@ MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
                 "Juillet", "Août", "Septembre", "Octobre", "Novembre",
                 "Décembre"]
 
-# Durée d'un pas, en millisecondes. Un cycle court a besoin d'un pas plus
-# long : sept jours à 500 ms feraient une boucle de trois secondes et demie,
-# trop rapide pour qu'un œil suive la carte et le ruban en même temps.
+# Le ruban écrit un libellé sous chaque barre, à quelques dizaines de pixels
+# d'intervalle : « Mercredi » et « Septembre » s'y chevauchent. Les commandes,
+# elles, gardent le nom entier — elles ont la place.
+DOW_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+MONTH_SHORT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin",
+               "Juil", "Août", "Sep", "Oct", "Nov", "Déc"]
+
+# Durée d'un pas, en millisecondes. Une seconde par heure : le temps de
+# parcourir la carte, de lire le pic qui monte et de revenir au ruban avant
+# que le pas ne change. En deçà, la page bouge plus vite qu'on ne la lit.
+#
+# Un cycle court a besoin d'un pas plus long : sept jours à une seconde
+# feraient une boucle de sept secondes, soit un battement plutôt qu'une
+# lecture. La boucle vise la vingtaine de secondes dans les trois cas.
 CYCLES = {
-    "hour": {"steps": 24, "ms": 520, "label": "Heure",
-             "title": "Une journée type", "labels": [f"{h}h" for h in range(24)]},
-    "dow": {"steps": 7, "ms": 900, "label": "Jour",
-            "title": "Une semaine type", "labels": DOW_LABELS},
-    "month": {"steps": 12, "ms": 760, "label": "Mois",
-              "title": "Une année type", "labels": MONTH_LABELS},
+    "hour": {"steps": 24, "ms": 1000, "label": "Heure",
+             "title": "Une journée type",
+             "labels": [f"{h}h" for h in range(24)],
+             "short": [f"{h}h" for h in range(24)]},
+    "dow": {"steps": 7, "ms": 1700, "label": "Jour",
+            "title": "Une semaine type", "labels": DOW_LABELS,
+            "short": DOW_SHORT},
+    "month": {"steps": 12, "ms": 1400, "label": "Mois",
+              "title": "Une année type", "labels": MONTH_LABELS,
+              "short": MONTH_SHORT},
 }
 
 # Zones trop rares pour porter une colonne : moins d'une course par jour en
@@ -248,22 +263,20 @@ def kpis(height: int = 160) -> None:
     components.html(_html(_KPIS, _cfg()), height=height, scrolling=False)
 
 
-# Cadrage de la carte. Il dépend du format du bloc autant que de la ville :
-# le cockpit donne à la carte trois colonnes sur cinq, soit un cadre presque
-# carré, là où un bandeau large tiendrait la baie de New York entière. Les
-# valeurs sont ici et non dans le JavaScript pour pouvoir être reprises si la
-# grille change de proportions.
-VIEW = {"longitude": -73.945, "latitude": 40.728, "zoom": 10.0, "bearing": -18}
+# Angle de vue de la carte. Le centre et l'échelle, eux, ne sont pas fixés
+# ici : le composant les calcule sur l'emprise réelle des zones et sur la
+# taille du bloc. Une valeur en dur se décrochait dès que la grille changeait
+# de proportions — la ville sortait du cadre ou flottait au milieu du noir.
+VIEW = {"pitch": 50, "bearing": -18}
 
 
-def city_map(height: int = 460, pitch: int = 50, title: str = "",
-             hint: str = "") -> None:
+def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
     """La carte à pics. Hauteur et couleur suivent la mesure du pas."""
     meta()
     # Le titre est blanc : il se pose sur le fond de nuit de la carte, qui ne
     # suit pas le thème de la page.
     head = _head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
-    components.html(_html(_MAP, _cfg(view={**VIEW, "pitch": pitch}, head=head)),
+    components.html(_html(_MAP, _cfg(view=VIEW, head=head)),
                     height=height, scrolling=False)
 
 
@@ -361,12 +374,12 @@ function staticBase() {
   } catch (e) { return "/app/static/"; }
 }
 
-let META = null, BIN = null, Z = 0;
+let META = null, BIN = null, Z = 0, READY = false;
 /* Table des séries : SERIES[cycle][mesure] est un Uint16Array de Z x pas,
    rangé zone par zone. L'ordre de lecture suit celui de l'écriture côté
    Python — cycles dans l'ordre du dictionnaire, mesures dans l'ordre de la
    liste. */
-const SERIES = {}, TOPS = {};
+const SERIES = {}, TOPS = {}, LOWS = {};
 
 /* État partagé. `at` est l'heure epoch du dernier changement de pas : chaque
    composant en déduit sa phase et anime en continu sans recevoir une image
@@ -401,17 +414,27 @@ async function load() {
   Z = META.zones.length;
   let offset = 0;
   for (const scope of Object.keys(META.cycles)) {
-    SERIES[scope] = {}; TOPS[scope] = {};
+    SERIES[scope] = {}; TOPS[scope] = {}; LOWS[scope] = {};
     const n = META.cycles[scope].steps;
     for (const m of META.measures) {
       const a = new Uint16Array(BIN, offset, Z * n);
       offset += Z * n * 2;
       SERIES[scope][m] = a;
-      let hi = 1;
-      for (let i = 0; i < a.length; i++) { if (a[i] > hi) { hi = a[i]; } }
+      /* Le maximum, et le plus petit relevé non nul. Les deux servent à la
+         carte : rapportée à zéro, la distance moyenne — qui ne descend
+         jamais sous deux milles — mettait toutes les zones au plafond et la
+         ville devenait un bloc doré. Le zéro, lui, reste le zéro : c'est une
+         zone sans course, pas une zone à courses courtes. */
+      let hi = 1, lo = 65535;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] > hi) { hi = a[i]; }
+        if (a[i] > 0 && a[i] < lo) { lo = a[i]; }
+      }
       TOPS[scope][m] = hi;
+      LOWS[scope][m] = lo < hi ? lo : 0;
     }
   }
+  READY = true;
   const el = document.getElementById("load");
   if (el) { el.remove(); }
 }
@@ -422,8 +445,10 @@ channel.onmessage = e => {
   if (m.type === "state") {
     S = m.state;
     /* Le payload peut n'être pas encore là : le premier dessin aura lieu
-       dans boot(), avec le dernier état reçu. */
-    if (META && typeof onState === "function") { onState(); }
+       dans boot(), avec le dernier état reçu. La garde porte sur READY et
+       non sur META, qui est posé avant que les séries ne soient découpées —
+       un état reçu entre les deux faisait lire un tableau inexistant. */
+    if (READY && typeof onState === "function") { onState(); }
   }
 };
 
@@ -493,11 +518,14 @@ def _controls_body() -> str:
     return (
         rf"""
 <style>
-  #wrap {{ position: absolute; inset: 0; display: flex; flex-direction: column;
-          justify-content: center; gap: 9px; padding: 0 2px; }}
-  .row {{ display: flex; align-items: center; gap: 4px; }}
+  /* Une seule ligne : cycle, mesure, pas courant, lecture. Les deux jeux de
+     boutons commandent la même horloge et se lisent donc d'un seul balayage,
+     à hauteur de la barre qui sépare le haut de page de la carte. */
+  #wrap {{ position: absolute; inset: 0; display: flex; align-items: center;
+          gap: 7px; padding: 0 2px; }}
   .tag {{ font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase;
-         color: {p['TEXT_DIM']}; width: 62px; flex: 0 0 62px; }}
+         color: {p['TEXT_DIM']}; flex: 0 0 auto; }}
+  .gap {{ flex: 0 0 22px; }}
   /* Au repos un bouton n'est que son mot. Pas de cadre, pas de fond : ce qui
      distingue l'actif doit être la seule chose à voir. */
   .sign {{ position: relative; border: 0; background: none; cursor: pointer;
@@ -550,19 +578,16 @@ def _controls_body() -> str:
   #play {{ font: inherit; font-size: 0.72rem; cursor: pointer; width: 30px;
           padding: 5px 0; border-radius: 3px; flex: 0 0 30px; }}
   #now {{ font-size: 1.15rem; font-weight: 600; margin-left: auto;
-         padding-right: 4px; font-variant-numeric: tabular-nums; }}
+         font-variant-numeric: tabular-nums; }}
 </style>
 <div id="wrap">
-  <div class="row">
-    <span class="tag">Cycle</span>
-    <div class="set" id="scopes" style="display:flex; gap:4px;"></div>
-    <div id="now"></div>
-  </div>
-  <div class="row">
-    <span class="tag">Mesure</span>
-    <div class="set" id="measures" style="display:flex; gap:4px;"></div>
-    <button id="play" style="margin-left:auto;">▶</button>
-  </div>
+  <span class="tag">Cycle</span>
+  <div id="scopes" style="display:flex; gap:4px;"></div>
+  <span class="gap"></span>
+  <span class="tag">Mesure</span>
+  <div id="measures" style="display:flex; gap:4px;"></div>
+  <div id="now"></div>
+  <button id="play"></button>
 </div>
 """
         + _CONTROLS_JS
@@ -777,30 +802,22 @@ _MAP = r"""
 <script>
 let deckgl = null;
 
-/* La carte garde son fond de nuit dans les deux thèmes. Une ville en relief
+/* La carte garde son fond de nuit dans les deux thèmes. Une ville extrudée
    se lit par ses ombres, et une ombre n'existe pas sur fond blanc : en thème
-   clair, les pics bas se confondaient avec le sol et la silhouette de New
-   York disparaissait. Le bloc est assumé comme une fenêtre sur la ville, pas
-   comme une surface de page. */
+   clair, les colonnes basses se confondaient avec le sol et la silhouette de
+   New York disparaissait. Le bloc est assumé comme une fenêtre sur la ville,
+   pas comme une surface de page. */
 document.body.style.background = "#0b0b0f";
 
-/* Des pics de diamètre fixe, et non les zones elles-mêmes extrudées.
-   Extruder une zone fait porter la lecture par sa surface : JFK, qui couvre
-   un morceau de Queens à lui seul, devenait un plateau doré large comme
-   Manhattan entier alors qu'il pèse une fraction de ses courses. La surface
-   n'encode rien, elle ne doit donc rien dire. Un pic de diamètre constant ne
-   laisse plus parler que sa hauteur.
-
-   Le sol garde les contours, à plat : il situe les pics sans les concurrencer. */
-const SPIKE_R = 280;      // rayon d'un pic, en mètres
-const TOP_M = 11000;      // hauteur du plus haut pic, en mètres
+/* Hauteur de la plus haute colonne, en mètres. Chaque mesure est ramenée à
+   son propre maximum : sans quoi la distance moyenne resterait au sol. */
+const TOP_M = 9000;
 
 /* Le bas de la rampe reste nettement au-dessus du fond : à trois heures du
    matin toutes les zones sont au plus bas, et une couleur basse trop proche
    du noir effacerait la ville au lieu de la montrer éteinte. */
-const RAMP = { a: [96, 88, 104], b: [240, 186, 74] };
-const GROUND = [38, 36, 44, 255];
-const GROUND_EDGE = [255, 255, 255, 26];
+const RAMP = { a: [58, 54, 67], b: [226, 172, 70] };
+const EDGE = [255, 255, 255, 30];
 
 /* Une lumière rasante donne le relief : c'est l'éclairage qui fait lire une
    hauteur, une couleur seule se lit comme une tache. L'effet est construit
@@ -810,83 +827,113 @@ function lighting() {
     return [];
   }
   return [new deck.LightingEffect({
-    amb: new deck.AmbientLight({ color: [255, 248, 232], intensity: 1.1 }),
-    key: new deck.DirectionalLight({ color: [255, 240, 214], intensity: 1.8,
+    amb: new deck.AmbientLight({ color: [255, 248, 232], intensity: 1.05 }),
+    key: new deck.DirectionalLight({ color: [255, 240, 214], intensity: 1.9,
                                      direction: [-1.2, -2.6, -1.8] }),
   })];
+}
+
+/* Staten Island et Newark sont hors du cadre utile : ils étirent l'emprise
+   d'un bon tiers pour une poignée de courses, et la ville se retrouverait
+   deux fois trop petite au milieu du noir. */
+const OFF_FRAME = new Set(["Staten Island", "EWR"]);
+
+/* Le cadrage est calculé, pas écrit : le bloc change de largeur avec la
+   grille et avec la fenêtre, et une échelle en dur se décroche aussitôt.
+   fitBounds raisonne en vue de dessus et sans rotation, alors que la carte
+   est inclinée à 50 degrés : le sol fuit vers l'horizon et le cadre couvre
+   beaucoup plus de terrain qu'une vue de dessus, si bien que la ville
+   flottait au milieu du noir. Les quatre cinquièmes de niveau repris sont la
+   correction de cette perspective — pas une marge de confort. */
+function fitted() {
+  const el = document.getElementById("map");
+  let w = 180, s = 90, e = -180, n = -90;
+  for (const z of META.zones) {
+    if (OFF_FRAME.has(z.borough)) { continue; }
+    for (const pt of z.polygon) {
+      if (pt[0] < w) { w = pt[0]; }
+      if (pt[0] > e) { e = pt[0]; }
+      if (pt[1] < s) { s = pt[1]; }
+      if (pt[1] > n) { n = pt[1]; }
+    }
+  }
+  const vp = new deck.WebMercatorViewport({
+    width: el.clientWidth || 600, height: el.clientHeight || 400 });
+  const fit = vp.fitBounds([[w, s], [e, n]], { padding: 0 });
+  /* Le centre de l'emprise tombe à l'est de Manhattan — le Queens est large
+     et tire la boîte de ce côté. Un demi-dixième de degré vers l'ouest et un
+     peu vers le sud ramènent dans le cadre ce qui porte la lecture. */
+  return { longitude: fit.longitude - 0.03, latitude: fit.latitude - 0.012,
+           zoom: fit.zoom + 0.8, pitch: CFG.view.pitch,
+           bearing: CFG.view.bearing };
 }
 
 function boot() {
   deckgl = new deck.DeckGL({
     container: "map",
-    /* Centré entre Manhattan et le Queens plutôt que sur Manhattan seul :
-       les deux aéroports portent des pics hauts, et les laisser hors cadre
-       ferait disparaître une partie de ce que la carte raconte. */
-    initialViewState: CFG.view,
+    initialViewState: fitted(),
     controller: true,
     effects: lighting(),
     onHover: info => {
-      if (!info || !info.object || info.layer.id !== "spikes") {
-        tipAt(0, 0, null); return;
-      }
+      if (!info || !info.object) { tipAt(0, 0, null); return; }
       const d = info.object;
       tipAt(info.x, info.y, "<b>" + d.name + "</b><br>" + d.borough + " · "
             + fmt(scaled(d.i, S.step, S.scope, S.measure), S.measure));
     },
     layers: [],
   });
+  /* Un ResizeObserver et non l'évènement `resize` de la fenêtre : au moment
+     de boot(), l'iframe peut n'avoir aucune dimension, et le cadrage se
+     ferait alors sur les valeurs de secours. L'observateur se déclenche dès
+     qu'une taille réelle existe, puis à chaque changement. */
+  const el = document.getElementById("map");
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (el.clientWidth && el.clientHeight) {
+        deckgl.setProps({ initialViewState: fitted() });
+      }
+    }).observe(el);
+  }
   frame();
 }
 
 function onState() { /* la boucle d'animation suit d'elle-même */ }
 
-/* Les hauteurs sont interpolées entre le pas courant et le suivant : à 520 ms
-   le pas, une montée instantanée saccade. L'interpolation est faite ici et
-   non par les transitions de deck.gl, qui repartiraient de zéro à chaque
-   changement de cycle ou de mesure. */
+/* Les hauteurs sont interpolées entre le pas courant et le suivant : à un pas
+   d'une seconde, une montée instantanée saccade. L'interpolation est faite
+   ici et non par les transitions de deck.gl, qui repartiraient de zéro à
+   chaque changement de cycle ou de mesure. */
 function frame() {
   if (deckgl && META) {
     const t = phase();
     const hi = TOPS[S.scope][S.measure];
+    const lo = LOWS[S.scope][S.measure];
+    const span = Math.max(1, hi - lo);
     const rows = META.zones.map((zone, i) => {
       const a = value(i, S.step, S.scope, S.measure);
       const b = value(i, S.step + 1, S.scope, S.measure);
-      return { ...zone, i: i, v: (a + (b - a) * t) / hi };
+      const raw = a + (b - a) * t;
+      return { ...zone, i: i, v: raw <= 0 ? 0 : Math.max(0, (raw - lo) / span) };
     });
-    deckgl.setProps({ layers: [
-      new deck.PolygonLayer({
-        id: "ground", data: META.zones, extruded: false, filled: true,
-        stroked: true, pickable: false,
-        getPolygon: d => d.polygon,
-        getFillColor: GROUND,
-        getLineColor: GROUND_EDGE,
-        lineWidthMinPixels: 0.5,
-      }),
-      new deck.ColumnLayer({
-        id: "spikes", data: rows, extruded: true, pickable: true,
-        /* Six côtés plutôt qu'un cercle : à cette taille à l'écran, un
-           cylindre lisse n'a pas d'arête pour accrocher la lumière rasante
-           et perd son relief. */
-        diskResolution: 6,
-        radius: SPIKE_R,
-        getPosition: d => [d.lon, d.lat],
-        /* Un plancher de 40 m : une zone à zéro course doit rester une
-           pastille au sol, sinon elle disparaît et la ville se troue. */
-        getElevation: d => Math.max(d.v * TOP_M, 40),
-        /* Rampe en puissance : la racine remonte les zones moyennes, qui
-           resteraient autrement indistinctes du sol. */
-        getFillColor: d => {
-          const u = Math.pow(d.v, 0.45);
-          return [RAMP.a[0] + u * (RAMP.b[0] - RAMP.a[0]),
-                  RAMP.a[1] + u * (RAMP.b[1] - RAMP.a[1]),
-                  RAMP.a[2] + u * (RAMP.b[2] - RAMP.a[2]), 245];
-        },
-        material: { ambient: 0.36, diffuse: 0.8, shininess: 30,
-                    specularColor: [72, 66, 54] },
-        updateTriggers: { getElevation: [S.scope, S.measure, S.step, t],
-                          getFillColor: [S.scope, S.measure, S.step, t] },
-      }),
-    ] });
+    deckgl.setProps({ layers: [new deck.PolygonLayer({
+      id: "zones", data: rows, extruded: true, filled: true, pickable: true,
+      getPolygon: d => d.polygon,
+      getElevation: d => Math.max(d.v * TOP_M, 30),
+      /* Rampe en puissance : la racine remonte les zones moyennes, qui
+         resteraient autrement indistinctes du fond. */
+      getFillColor: d => {
+        const u = Math.pow(d.v, 0.45);
+        return [RAMP.a[0] + u * (RAMP.b[0] - RAMP.a[0]),
+                RAMP.a[1] + u * (RAMP.b[1] - RAMP.a[1]),
+                RAMP.a[2] + u * (RAMP.b[2] - RAMP.a[2]), 234];
+      },
+      getLineColor: EDGE,
+      lineWidthMinPixels: 0.5,
+      material: { ambient: 0.38, diffuse: 0.78, shininess: 28,
+                  specularColor: [72, 66, 54] },
+      updateTriggers: { getElevation: [S.scope, S.measure, S.step, t],
+                        getFillColor: [S.scope, S.measure, S.step, t] },
+    })] });
   }
   requestAnimationFrame(frame);
 }
@@ -905,8 +952,20 @@ const ctx = cv.getContext("2d");
 /* Le ruban montre une fenêtre glissante autour du pas courant. Le passé file
    vers la gauche, l'à-venir arrive par la droite ; le présent reste sur une
    ligne fixe, légèrement à gauche du centre pour laisser voir ce qui vient. */
-const AHEAD = 7, BEHIND = 9;
+/* Le présent reste sur une ligne fixe, légèrement à gauche du centre pour
+   laisser voir ce qui vient. */
 const NOW_X = 0.42;
+
+/* La fenêtre s'accorde à la longueur du cycle. Seize cases pour sept jours
+   feraient défiler la semaine deux fois et demie dans le cadre, et les
+   libellés se chevaucheraient ; quelques cases de plus que le cycle suffisent
+   à montrer que le ruban boucle. */
+function window_() {
+  const n = stepsOf(S.scope);
+  const span = Math.min(16, n + 4);
+  const behind = Math.round(NOW_X * span);
+  return { span: span, behind: behind, ahead: span - behind };
+}
 
 function size() {
   const r = window.devicePixelRatio || 1;
@@ -952,7 +1011,7 @@ function draw() {
   const { vals, max } = series();
   const n = vals.length;
   const t = phase();
-  const span = AHEAD + BEHIND;
+  const { span, behind: BEHIND, ahead: AHEAD } = window_();
   const pitch = w / span;
   const bw = Math.min(pitch * 0.58, 26);
   /* `top` garde au-dessus des barres de quoi écrire la valeur du pas
@@ -982,7 +1041,7 @@ function draw() {
     ctx.globalAlpha = here ? 0.95 : 0.3 + fade * 0.4;
     ctx.fillStyle = here ? C.ink : C.dim;
     ctx.font = (here ? "600 " : "") + "11px system-ui, sans-serif";
-    ctx.fillText(META.cycles[S.scope].labels[idx], x, base + 16);
+    ctx.fillText(META.cycles[S.scope].short[idx], x, base + 16);
     if (here) {
       ctx.font = "600 12px system-ui, sans-serif";
       ctx.fillStyle = C.accent;

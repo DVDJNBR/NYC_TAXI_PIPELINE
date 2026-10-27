@@ -6,26 +6,27 @@ ce qui est affiché se recompose au même pas. La carte, le ruban, les flux et
 les quatre nombres montrent la même heure de la même journée, sinon ils ne
 disent rien.
 
-La grille fait cinq colonnes sur quatre rangées, et la carte occupe trois
-colonnes sur trois rangées :
+Trois bandes, et les commandes au milieu :
 
     ┌───────────────┬───────────────────────────────┐
-    │ 4 nombres     │ ruban qui défile              │  rangée 1
-    ├───────────────┼───────────────────────────────┤
-    │ commandes     │                               │  rangée 2
-    ├───────────────┤  carte à pics          3 x 3  │
-    │ flux entre    │                               │  rangée 3
-    │ arrondis-     │                               │
-    │ sements  2x2  │                               │  rangée 4
-    └───────────────┴───────────────────────────────┘
+    │ 4 nombres     │ ruban qui défile              │
+    ├───────────────┴───────────────────────────────┤
+    │ cycle · mesure · pas courant · lecture        │
+    ├───────────────────────────────┬───────────────┤
+    │ carte à pics                  │ d'où l'on     │
+    │                               │ part, où l'on │
+    │                               │ arrive        │
+    └───────────────────────────────┴───────────────┘
+
+Les commandes sont au centre et non en tête : elles séparent ce qui résume
+— les nombres, le ruban — de ce qui situe — la carte, les trajets. Elles
+tombent ainsi à portée des deux, au lieu de surplomber l'un et d'abandonner
+l'autre en bas de page.
 
 Streamlit ne connaît pas les grilles : `st.columns` prend des poids, et
-l'empilement vertical vient de l'ordre d'écriture. Une cellule ne peut donc
-pas s'étendre sur plusieurs rangées. Deux colonnes de poids 2 et 3 donnent
-les cinq colonnes ; les rangées sont reconstituées en empilant des blocs dont
-la hauteur est un multiple exact de l'unité de rangée, l'écart inter-blocs
-compris. D'où le calcul explicite de `_ROWS` plus bas : c'est ce qui fait que
-le bas de la carte et le bas des flux tombent sur la même ligne.
+l'empilement vertical vient de l'ordre d'écriture. Chaque bande est donc une
+rangée de colonnes, et les hauteurs sont fixées en pixels pour que deux
+blocs voisins s'alignent.
 
 Chaque bloc porte son titre à l'intérieur de son iframe, en surimpression.
 Un titre posé par Streamlit au-dessus du bloc ajouterait une marge propre à
@@ -39,15 +40,12 @@ import streamlit as st
 
 import nyc_live
 
-# Unité de rangée, en pixels, et écart vertical entre deux blocs empilés —
-# celui que Streamlit pose entre deux éléments d'une colonne.
-ROW = 164
-GAP = 16
-
-
-def _rows(n: int) -> int:
-    """Hauteur d'un bloc couvrant `n` rangées, écarts internes compris."""
-    return ROW * n + GAP * (n - 1)
+# Hauteurs des trois bandes, en pixels. Les composants vivent dans des
+# iframes de taille fixe : sans ces valeurs, deux blocs voisins ne s'alignent
+# pas.
+H_TOP = 170
+H_CONTROLS = 54
+H_BOTTOM = 440
 
 
 def render():
@@ -59,29 +57,30 @@ def render():
         )
         return
 
-    left, right = st.columns([2, 3], gap="medium")
-
-    with left:
-        nyc_live.kpis(height=_rows(1))
-        nyc_live.controls(height=_rows(1))
-        nyc_live.flows(
-            height=_rows(2),
-            title="D'où l'on part, où l'on arrive",
-            hint="Courses internes à un arrondissement écartées : à 87 % du "
-                 "total, elles écrasaient tout le reste.",
-        )
-
-    with right:
+    numbers, ribbon = st.columns([2, 3], gap="medium")
+    with numbers:
+        nyc_live.kpis(height=H_TOP)
+    with ribbon:
         nyc_live.profile(
-            height=_rows(1),
+            height=H_TOP,
             title="Le volume de la ville, pas par pas",
             hint="Le présent est sur le trait ; le passé file à gauche.",
         )
+
+    nyc_live.controls(height=H_CONTROLS)
+
+    city, trips = st.columns([3, 2], gap="medium")
+    with city:
         nyc_live.city_map(
-            # Trois rangées : les mêmes que celles qu'occupent, à gauche, les
-            # commandes puis les flux — 164 + 16 + 344 font bien 524.
-            height=_rows(3),
+            height=H_BOTTOM,
             title="New York au pas de l'horloge",
             hint="Hauteur et couleur d'une zone : la mesure choisie, au pas "
                  "affiché.",
+        )
+    with trips:
+        nyc_live.flows(
+            height=H_BOTTOM,
+            title="D'où l'on part, où l'on arrive",
+            hint="Courses internes à un arrondissement écartées : à 87 % du "
+                 "total, elles écrasaient tout le reste.",
         )

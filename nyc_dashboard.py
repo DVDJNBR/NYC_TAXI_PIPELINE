@@ -8,15 +8,13 @@ est isolée du rendu.
 
 Structure de l'interface :
 
-    [sidebar]   Dashboard (par défaut)
-                ---
-                À propos
-                Pipeline de données
+    [bandeau]   Dashboard · À propos · Pipeline de données | logo + titre |
+                thème | langue
 
 Le dashboard est une grille unique — le cockpit — et non plus quatre sections
-à parcourir. La barre ne porte donc qu'une entrée principale, suivie des deux
-pages de contexte. Elle est écrite depuis `run()`, avant le corps de la page :
-c'est un contrôle global.
+à parcourir. Une barre latérale pour trois entrées prenait une colonne entière
+pour ne rien dire : les onglets sont passés dans le bandeau, où ils tiennent
+sur une ligne et rendent sa largeur à la grille.
 """
 
 import pathlib
@@ -38,12 +36,9 @@ PAGE_CONFIG = dict(
     page_title="NYC Yellow Taxi",
     page_icon=LOGO_PATH,
     layout="wide",
-    # Un entier à la place de "expanded" fixe la largeur de la barre en
-    # pixels (Streamlit 1.66, borné à 200-600 — 200 est le minimum) et met
-    # l'état sur "auto" :
-    # ouverte sur un écran large, repliée sur un écran étroit. Le visiteur
-    # peut toujours la tirer par son bord ; sa largeur est alors retenue.
-    initial_sidebar_state=200,
+    # Plus de barre latérale : rien n'est écrit dans st.sidebar, et Streamlit
+    # ne rend ni la colonne ni son bouton de dépli.
+    initial_sidebar_state="collapsed",
 )
 
 # Les vues sont des clés, pas des intitulés : elles servent à la fois de
@@ -79,14 +74,13 @@ def run(load_data):
     # dessiné par nyc_theme, à gauche du titre dans le bandeau, où il reste
     # dans les deux états. LOGO_PATH sert encore d'icône d'onglet.
     nyc_theme.inject_css()
-    # Hors de st.sidebar : le CSS épingle le groupe dans la bannière en
-    # position fixe, et une barre repliée est déplacée par un `transform`, qui
-    # ferait alors office de bloc conteneur et emporterait le groupe hors de
-    # l'écran avec elle.
-    nyc_theme.band()
+    # Les onglets sont rendus par band(), dans le groupe en position fixe de
+    # la bannière : un widget écrit ailleurs atterrirait dans le corps de la
+    # page. D'où la navigation passée en fonction plutôt qu'appelée ici.
+    nyc_theme.band(nav=_nav)
 
     daily, hourly, zones, profile, congestion, split, payment = _load(load_data)
-    view = _sidebar()
+    view = st.session_state.get("nav_view", DEFAULT_SECTION)
 
     if view == PAGE_ABOUT:
         st.title("NYC Yellow Taxi")
@@ -140,23 +134,23 @@ def _cross(name):
     return df if not df.empty else None
 
 
-def _sidebar():
-    """Le dashboard, puis les deux pages de contexte.
+def _nav():
+    """Les trois onglets, rendus dans le bandeau par nyc_theme.band().
 
-    Un seul `st.radio` et non deux listes empilées : deux widgets porteraient
-    deux sélections indépendantes, et il faudrait arbitrer laquelle a changé
-    en dernier. Ici l'état est unique, et la hiérarchie est affaire de CSS.
+    Un `st.radio` et non trois boutons : l'état est unique et porté par le
+    widget, là où trois boutons demanderaient d'arbitrer lequel a été cliqué
+    en dernier. Les pastilles sont masquées en CSS — une case cochée est un
+    formulaire, pas une barre d'onglets.
     """
-    with st.sidebar:
-        view = st.radio(
-            "Vue", VIEWS, index=_index(VIEWS, "vue", DEFAULT_SECTION),
-            format_func=lambda key: nyc_lang.t("nav." + key),
-            label_visibility="collapsed", key="nav_view",
-        )
-        # La bascule de thème recharge la page : sans ce paramètre d'URL,
-        # l'état serait perdu et l'on repartirait sur la vue par défaut.
-        # Bonus : les vues deviennent partageables.
-        st.query_params["vue"] = view
+    view = st.radio(
+        "Vue", VIEWS, index=_index(VIEWS, "vue", DEFAULT_SECTION),
+        format_func=lambda key: nyc_lang.t("nav." + key),
+        horizontal=True, label_visibility="collapsed", key="nav_view",
+    )
+    # La bascule de thème recharge la page : sans ce paramètre d'URL, l'état
+    # serait perdu et l'on repartirait sur la vue par défaut. Bonus : les vues
+    # deviennent partageables.
+    st.query_params["vue"] = view
     return view
 
 

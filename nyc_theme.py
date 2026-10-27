@@ -738,7 +738,7 @@ def inject_css():
            l'état au chargement. */
         .st-key-band {{
             position: fixed !important; top: 0 !important;
-            left: var(--nyc-band-x, 340px) !important; right: auto !important;
+            left: var(--nyc-band-x, 20px) !important; right: auto !important;
             height: 60px !important; width: auto !important;
             display: flex !important; flex-direction: row !important;
             align-items: center !important; gap: 0.625rem !important;
@@ -807,6 +807,57 @@ def inject_css():
         .st-key-band [data-testid="stRadioOption"]:hover p {{ opacity: 0.8; }}
         .st-key-band [data-testid="stRadioOption"]:has(input:checked) p {{
             opacity: 1;
+        }}
+
+        /* Onglets du bandeau : la navigation a quitté la barre latérale, qui
+           n'existe plus. Ils se placent avant le logo — `order: 0`, puisque
+           le logo et le nom sont des pseudo-éléments d'ordre 1 et 2.
+
+           Le vocabulaire est celui du bandeau, pas celui de l'ancienne barre :
+           capitales étroites, un seul gris, l'actif en plein. Le panneau vert
+           et le phare ne sont pas repris ici — ils tiennent maintenant les
+           boutons de l'horloge, dans la page, où ils commandent quelque chose
+           qui bouge. Deux endroits à les porter, et ils ne désigneraient plus
+           rien. */
+        /* Le conteneur à clé n'est pas l'enfant direct du bandeau :
+           Streamlit l'enveloppe dans un bloc anonyme, et c'est lui qui porte
+           l'`order: 3` de la règle ci-dessus. C'est donc l'enveloppe qu'il
+           faut viser — d'où le `:has`, qui gagne aussi l'arbitrage de
+           spécificité à !important égal. */
+        .st-key-band > :has(.st-key-navbar) {{
+            order: 0 !important;
+            margin-right: 1.5rem !important;
+        }}
+        .st-key-navbar [data-testid="stRadioGroup"] {{
+            flex-direction: row !important;
+            gap: 1.15rem !important;
+            align-items: center;
+        }}
+        .st-key-navbar [data-testid="stRadioOption"] {{ position: relative; }}
+        .st-key-navbar [data-testid="stRadioOption"] p {{
+            font-size: 0.75rem !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            color: {_band_ink()} !important;
+            opacity: 0.48;
+            transition: opacity 0.18s ease;
+        }}
+        .st-key-navbar [data-testid="stRadioOption"]:hover p {{ opacity: 0.82; }}
+        .st-key-navbar [data-testid="stRadioOption"]:has(input:checked) p {{
+            opacity: 1;
+            color: {p['ACCENT']} !important;
+        }}
+        /* Un filet sous l'onglet actif : la couleur seule ne suffit pas à
+           trois intitulés serrés, et c'est le repère qu'un onglet porte
+           partout ailleurs. */
+        .st-key-navbar [data-testid="stRadioOption"]:has(input:checked)::after {{
+            content: "";
+            position: absolute;
+            left: 0; right: 0; bottom: -7px;
+            height: 2px; border-radius: 1px;
+            background: {p['ACCENT']};
         }}
 
         /* Déclencheur de rerun du bouton de thème : présent dans le DOM pour
@@ -1002,16 +1053,16 @@ try {
 // abscisse est donc la mesure cherchée, et un ResizeObserver sur lui voit
 // aussi bien le glissement que le repli.
 //
-// Barre ouverte : 20 px de marge, celle que le logo prenait dans la barre.
-// Barre repliée : le bandeau part de 0 et Streamlit y remet son bouton de
-// dépli, large de 28 px contre le bord — le groupe recule à 64 px.
+// 20 px de marge en partant du bord de la bannière. L'application n'a plus
+// de barre latérale, mais la mesure reste prise sur la bannière : elle vaut
+// aussi si une barre revient un jour, et ne coûte rien.
 function placeBand() {
   try {
     var d = doc();
     var h = d.querySelector('[data-testid="stHeader"]');
     if (!h) { return; }
     var x = Math.round(h.getBoundingClientRect().left);
-    d.documentElement.style.setProperty('--nyc-band-x', (x + (x > 0 ? 20 : 64)) + 'px');
+    d.documentElement.style.setProperty('--nyc-band-x', (x + 20) + 'px');
   } catch (e) {}
 }
 
@@ -1026,8 +1077,12 @@ try {
 """
 
 
-def band():
-    """Le groupe de la barre de titre : logo, nom, thème, langue.
+def band(nav=None):
+    """Le groupe de la barre de titre : onglets, logo, nom, thème, langue.
+
+    `nav` est la fonction qui rend les onglets. Ils sont écrits ici et non
+    dans la page parce que le groupe est en position fixe dans la bannière :
+    un widget rendu ailleurs atterrirait dans le corps du document.
 
     Le logo et le nom sont des pseudo-éléments posés par `inject_css()` sur le
     conteneur rendu ici ; seules les deux commandes sont des widgets.
@@ -1125,6 +1180,11 @@ def band():
     # accroche la position fixe qui pose le groupe dans la bannière, ainsi que
     # le logo et le titre en pseudo-éléments.
     with st.container(key="band"):
+        if nav is not None:
+            # Conteneur à clé : le CSS le distingue du sélecteur de langue,
+            # qui est aussi un groupe de boutons radio dans ce bandeau.
+            with st.container(key="navbar"):
+                nav()
         components.html(
             (
             f'<style>{css}</style>'
