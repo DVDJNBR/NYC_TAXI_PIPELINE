@@ -41,6 +41,7 @@ des données embarquées repasseraient par la connexion à chaque clic.
 
 import json
 import pathlib
+import shutil
 import uuid
 
 import numpy as np
@@ -54,6 +55,13 @@ import nyc_zones
 ROOT = pathlib.Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 GEO = ROOT / "data" / "reference" / "taxi_zones.json"
+# La maquette de la ville : 2 601 emprises de bâtiments avec leur hauteur de
+# toit, tirées une fois du cadastre ouvert de New York. Aucun script du dépôt
+# ne la reconstruit — c'est un export unique, pas un calcul — donc elle est
+# versionnée comme les contours de zones et copiée telle quelle vers static/.
+# Sans cette copie, le conteneur de production n'a pas de tours : le fichier
+# n'existait que dans static/, qui est hors du dépôt.
+CITY = ROOT / "data" / "reference" / "nyc_city.json"
 ZONE_CYCLE = ROOT / "data" / "aggregates" / "zone_cycle.parquet"
 OD_CYCLE = ROOT / "data" / "aggregates" / "od_cycle.parquet"
 
@@ -242,8 +250,25 @@ def _outer_ring(geometry: dict) -> list:
 
 
 def meta() -> dict:
+    _serve_city()
     return _build(PAYLOAD_VERSION, GEO.stat().st_mtime,
                   ZONE_CYCLE.stat().st_mtime, OD_CYCLE.stat().st_mtime)
+
+
+def _serve_city() -> None:
+    """Pose la maquette de ville dans static/, si elle n'y est pas déjà.
+
+    Hors du cache de _build : la copie ne dépend d'aucun agrégat, et laissée
+    dedans elle n'avait lieu qu'au premier calcul. Un processus au cache
+    chaud dont static/ vient d'être recréé se retrouvait alors sans tours.
+    """
+    if not CITY.exists():
+        return
+    out = STATIC / "nyc_city.json"
+    if out.exists() and out.stat().st_size == CITY.stat().st_size:
+        return
+    STATIC.mkdir(exist_ok=True)
+    shutil.copyfile(CITY, out)
 
 
 # ---------------------------------------------------------------------------
