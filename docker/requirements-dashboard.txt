@@ -2,7 +2,7 @@
 # Volontairement séparées de pyproject.toml qui contient aussi dbt-core, dbt-snowflake,
 # jupyter, matplotlib... inutiles ici et lourds sur un VPS à l'espace disque limité.
 streamlit>=1.66.0
-duckdb>=1.5.1
+duckdb<2.0.0,>=1.1.0
 pandas>=2.3.3
 plotly>=6.3.1
 pyarrow>=21.0.0

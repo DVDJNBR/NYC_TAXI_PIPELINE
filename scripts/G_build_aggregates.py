@@ -178,7 +178,7 @@ def main(only: str | None = None) -> None:
         target = OUT / f"{name}.parquet"
         t0 = time.time()
         con.sql(f"COPY ({query}) TO '{target}' (FORMAT PARQUET)")
-        rows = con.sql(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
+        rows = con.execute(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
         print(f"✓ {name:<16} {rows:>6} lignes  {time.time() - t0:5.1f} s")
 
 
