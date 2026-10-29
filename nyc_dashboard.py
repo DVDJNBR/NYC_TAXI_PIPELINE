@@ -89,11 +89,9 @@ def run(load_data):
         st.title("NYC Yellow Taxi")
         nyc_content.render_pipeline_tab()
     else:
-        _scope_strip(daily)
         nyc_cockpit.render()
 
-    st.markdown("---")
-    st.caption("Source : NYC Taxi & Limousine Commission (TLC) — Yellow Taxi Trip Records")
+    _footer(daily)
 
 
 def _load(load_data):
@@ -154,13 +152,29 @@ def _nav():
     return view
 
 
-def _scope_strip(daily):
-    """Trois nombres qui situent les données, sur une ligne, sous le titre."""
+_TLC_URL = "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page"
+
+
+def _footer(daily):
+    """Provenance et amplitude, sur une ligne, en bas à droite.
+
+    Ces nombres situent les données, ils ne les racontent pas : en tête de
+    page ils prenaient de la hauteur au-dessus de ce qu'ils décrivent, et le
+    cockpit perdait d'autant. En pied, ils se lisent quand on les cherche.
+
+    Ils voisinent avec la source parce qu'ils disent la même chose : ce que
+    couvre le jeu de données, et d'où il vient.
+    """
+    st.markdown("---")
     st.markdown(
         nyc_theme._html(
-            f"<div class='scope-strip'>{nyc_theme.fmt_int(daily['TOTAL_TRIPS'].sum())}"
+            "<div class='page-foot'>"
+            f"<a href='{_TLC_URL}' target='_blank' rel='noopener'>"
+            "NYC Taxi &amp; Limousine Commission</a> · Yellow Taxi Trip "
+            f"Records · {nyc_theme.fmt_int(daily['TOTAL_TRIPS'].sum())}"
             f" courses · {len(daily)} jours · "
-            f"{daily['PICKUP_DATE'].min():%b %Y} – {daily['PICKUP_DATE'].max():%b %Y}</div>"
+            f"{daily['PICKUP_DATE'].min():%b %Y} – "
+            f"{daily['PICKUP_DATE'].max():%b %Y}</div>"
         ),
         unsafe_allow_html=True,
     )

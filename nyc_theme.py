@@ -345,6 +345,19 @@ def inject_css():
             border-bottom: 1px solid {p['RULE']};
         }}
 
+        /* Streamlit réserve 6rem au-dessus du contenu et 10rem en dessous.
+           Le bandeau n'en fait que 3,75 : il restait un pouce de vide entre
+           la barre et le premier bloc, et une page de vide sous le dernier.
+           Les trois sélecteurs visent la même boîte selon la version — la
+           1.66 a renommé stAppViewBlockContainer en stMainBlockContainer et
+           garde .block-container en classe. */
+        [data-testid="stMainBlockContainer"],
+        [data-testid="stAppViewBlockContainer"],
+        .block-container {{
+            padding-top: 4.4rem !important;
+            padding-bottom: 3rem !important;
+        }}
+
         h1 {{ font-size: 1.6rem !important; font-weight: 600 !important;
               letter-spacing: -0.01em; color: {p['TEXT_LIGHT']} !important; }}
         h2 {{ font-size: 0.78rem !important; font-weight: 600 !important;
@@ -673,12 +686,19 @@ def inject_css():
         /* Rappel de périmètre : une ligne sous le titre, assez discrète pour
            ne pas concurrencer les indicateurs qui suivent. Remonte contre le
            titre — Streamlit laisse sinon un blanc qui la détache du bloc. */
-        .scope-strip {{
-            margin: -10px 0 18px;
+        /* Pied de page : la provenance et l'amplitude, alignées à droite.
+           Elles ferment la page au lieu de la précéder. */
+        .page-foot {{
+            margin: -6px 0 4px;
+            text-align: right;
             font-size: 0.74rem;
             color: {p['TEXT_DIM']};
             font-variant-numeric: tabular-nums;
         }}
+        .page-foot a {{ color: {p['TEXT_DIM']}; text-decoration: none;
+                       border-bottom: 1px solid {p['RULE']}; }}
+        .page-foot a:hover {{ color: {p['TEXT_LIGHT']};
+                             border-bottom-color: {p['BRICK']}; }}
 
         /* Sélecteur de section : la même discrétion que la navigation, des
            libellés un cran plus petits que le corps de texte. */
