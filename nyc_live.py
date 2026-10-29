@@ -1027,21 +1027,23 @@ _KPIS = r"""
      l'entrant : ils occupent la même ligne et se croisent sur place. Un seul
      élément qu'on vide puis remplit laisserait une case vide entre les deux,
      et c'est ce trou qui se voit, pas le changement. */
-  .k-val, .k-sub { display: grid; min-width: 0; }
-  .k-val > span, .k-sub > span {
+  .k-lab, .k-val, .k-sub { display: grid; min-width: 0; }
+  .k-lab > span, .k-val > span, .k-sub > span {
       grid-area: 1 / 1; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       transition: opacity 0.22s ease, transform 0.22s ease; }
   /* Le sortant monte, l'entrant vient d'en dessous : le même sens que le
      ruban, où le passé file et l'à-venir arrive. */
-  .k-val > span.out, .k-sub > span.out {
+  .k-lab > span.out, .k-val > span.out, .k-sub > span.out {
       opacity: 0; transform: translateY(-0.3em); }
-  .k-val > span.in, .k-sub > span.in {
+  .k-lab > span.in, .k-val > span.in, .k-sub > span.in {
       opacity: 0; transform: translateY(0.3em); }
   @media (prefers-reduced-motion: reduce) {
-      .k-val > span, .k-sub > span { transition: opacity 0.22s ease; }
-      .k-val > span.out, .k-sub > span.out,
-      .k-val > span.in, .k-sub > span.in { transform: none; } }
+      .k-lab > span, .k-val > span, .k-sub > span {
+          transition: opacity 0.22s ease; }
+      .k-lab > span.out, .k-val > span.out, .k-sub > span.out,
+      .k-lab > span.in, .k-val > span.in, .k-sub > span.in {
+          transform: none; } }
 </style>
 <div id="grid"></div>
 <script>
@@ -1062,26 +1064,145 @@ _KPIS = r"""
 
    Le nom de zone, lui, n'est pas un nombre : il ne compte pas, il se croise
    sur place. */
-/* Le nombre de courses n'est pas ici : le ruban le montre déjà, barre par
-   barre, et le répéter en gros à côté ne dit rien de plus. À sa place, le
-   prix d'une course — qui ne se lit nulle part ailleurs et qui bouge dans
-   l'autre sens : 24,33 $ au creux de la nuit, 34,76 $ à la pointe. */
-const CELLS = ["perride", "revenue", "distance", "top"];
-const CELL_LABEL = { perride: "$ par course", revenue: "Encaissé",
-                     distance: "Distance moyenne", top: "Zone la plus active" };
+/* Quatre nombres, une seule règle : ils doivent bouger dans le cycle. Un
+   nombre qui ne bouge pas n'appartient pas au cockpit, il appartient à la
+   fiche signalétique — et la fiche est maintenant en pied de page.
+
+   Mesuré sur les 24 pas de l'heure :
+     — le mile coûte 5,83 $ à 5 h et 9,37 $ à 18 h              (x1,6)
+     — hors Manhattan, 9,4 % des courses à 18 h, 26,7 % à 5 h   (x2,8)
+     — la moitié des courses tient dans 9 zones à 2 h, 17 à 5 h  (x1,9)
+
+   Écarté : l'encaissé total, corrélé aux courses à 0,995, qui les redit en
+   dollars ; la zone la plus active, qui est Midtown vingt-deux pas sur
+   vingt-quatre ; le prix d'une course, qui ne varie que de 24,30 à 34,71 $
+   et que le prix du mile dit mieux — un mile cher, c'est de la circulation,
+   une course chère peut n'être qu'un long trajet.
+
+   La quatrième case suit le panneau allumé. Sans elle, choisir « Distance »
+   ne changeait rien de lisible hors de la carte : la commande pilotait un
+   bloc et laissait les nombres où ils étaient. */
+const CELLS = ["permile", "outer", "spread", "pick"];
+const CELL_LABEL = { permile: "Le prix du mile",
+                     outer: "Hors Manhattan",
+                     spread: "La moitié des courses" };
+
+/* Les zones qui ne sont pas de Manhattan, relevées une fois au démarrage. */
+let OUTER = [];
 
 function boot() {
   const g = document.getElementById("grid");
   for (const key of CELLS) {
     g.insertAdjacentHTML("beforeend",
       '<div class="kpi" id="c-' + key + '">'
-      + '<div class="k-lab" style="color:' + C.dim + '">'
-      + CELL_LABEL[key] + '</div>'
+      + '<div class="k-lab" style="color:' + C.dim + '"></div>'
       + '<div class="k-val"></div>'
       + '<div class="k-sub" style="color:' + C.dim + '"></div></div>');
   }
+  OUTER = [];
+  for (let z = 0; z < Z; z++) {
+    if (META.zones[z].borough !== "Manhattan") { OUTER.push(z); }
+  }
   onState();
 }
+
+/* Somme d'une mesure sur un sous-ensemble de zones, à un pas donné. */
+function sumAt(step, measure, zones) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const a = SERIES[S.scope][measure];
+  let s = 0;
+  for (const z of zones) { s += a[z * n + idx]; }
+  return s * META.cycles[S.scope].scales[measure];
+}
+
+/* Milles parcourus par la ville : distance moyenne de chaque zone multipliée
+   par ses courses. Sommer les moyennes donnerait le même poids à une zone de
+   trois courses qu'à Midtown. */
+function cityMiles(step) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const d = SERIES[S.scope].distance, t = SERIES[S.scope].trips;
+  const ds = META.cycles[S.scope].scales.distance;
+  const ts = META.cycles[S.scope].scales.trips;
+  let mi = 0;
+  for (let z = 0; z < Z; z++) {
+    mi += d[z * n + idx] * ds * t[z * n + idx] * ts;
+  }
+  return mi;
+}
+
+/* Ce que coûte un mille parcouru. C'est le seul nombre du bloc qui parle de
+   circulation : le tarif compte au mille et à la minute, donc un mille cher
+   est un mille lent. */
+function perMile(step) {
+  const mi = cityMiles(step);
+  return mi ? cityAt(step, "revenue") / mi : 0;
+}
+
+/* Part des courses qui ne partent pas de Manhattan. La nuit la ville se
+   replie sur l'île ; au petit matin, un quart des départs sont ailleurs. Le
+   ruban dit quelles liaisons, ce nombre dit combien. */
+function outerShare(step) {
+  const t = cityAt(step, "trips");
+  return t ? sumAt(step, "trips", OUTER) / t * 100 : 0;
+}
+
+/* Combien de zones il faut pour tenir la moitié des courses. La ville se
+   resserre la nuit sur une poignée de quartiers et s'étale au petit matin ;
+   un seul nombre le dit, là où une carte demande d'être lue. */
+function halfSpread(step) {
+  const n = stepsOf(S.scope);
+  const idx = ((step % n) + n) % n;
+  const a = SERIES[S.scope].trips;
+  const v = [];
+  let tot = 0;
+  for (let z = 0; z < Z; z++) {
+    const x = a[z * n + idx];
+    if (x > 0) { v.push(x); tot += x; }
+  }
+  v.sort((x, y) => y - x);
+  let acc = 0, k = 0;
+  while (k < v.length && acc < tot / 2) { acc += v[k]; k++; }
+  return k;
+}
+
+function cellValue(key, step) {
+  if (key === "permile") { return perMile(step); }
+  if (key === "outer") { return outerShare(step); }
+  if (key === "spread") { return halfSpread(step); }
+  return cityValue(step, S.measure);
+}
+
+function cellLabel(key) {
+  return key === "pick" ? MEASURE_LABEL[S.measure] : CELL_LABEL[key];
+}
+
+function cellFormat(key) {
+  if (key === "permile") {
+    return x => "$" + x.toFixed(2).replace(".", ",") + " / mi";
+  }
+  if (key === "outer") {
+    return x => x.toFixed(1).replace(".", ",") + " %";
+  }
+  if (key === "spread") { return x => Math.round(x) + " zones"; }
+  return x => fmt(x, S.measure);
+}
+
+/* La courbe du cycle entier, mise en cache : elle ne change qu'avec le cycle
+   et, pour la dernière case, avec la mesure choisie. */
+const SPARK = {};
+function cellSeries(key) {
+  const ck = S.scope + "/" + key + (key === "pick" ? "/" + S.measure : "");
+  if (!SPARK[ck]) {
+    const n = stepsOf(S.scope);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) { out[i] = cellValue(key, i); }
+    SPARK[ck] = out;
+  }
+  return SPARK[ck];
+}
+
 
 /* Somme d'une mesure sur toutes les zones, à un pas donné. */
 function cityAt(step, measure) {
@@ -1112,42 +1233,17 @@ function cityDistance(step) {
 
 function cityValue(step, measure) {
   if (measure === "distance") { return cityDistance(step); }
-  /* Le prix d'une course se calcule sur les totaux de la ville, pas sur une
-     moyenne de moyennes : une zone à trois courses pèserait autant que
-     Midtown. */
-  if (measure === "perride") {
-    const t = cityAt(step, "trips");
-    return t ? cityAt(step, "revenue") / t : 0;
-  }
   return cityAt(step, measure);
 }
 
-/* Moyenne de la mesure sur le cycle entier : c'est elle qui donne son sens au
+/* Moyenne de la case sur le cycle entier : c'est elle qui donne son sens au
    nombre du pas. « 2 273 courses » ne dit rien ; « +38 % sur la journée »
-   situe l'heure dans la journée. */
-const AVG = {};
-function cycleAverage(measure) {
-  const key = S.scope + "/" + measure;
-  if (AVG[key] === undefined) {
-    const n = stepsOf(S.scope);
-    let s = 0;
-    for (let i = 0; i < n; i++) { s += cityValue(i, measure); }
-    AVG[key] = s / n;
-  }
-  return AVG[key];
-}
-
-function topZone(step, measure) {
-  const n = stepsOf(S.scope);
-  const idx = ((step % n) + n) % n;
-  const a = SERIES[S.scope][measure];
-  let best = -1, at = 0;
-  for (let z = 0; z < Z; z++) {
-    const v = a[z * n + idx];
-    if (v > best) { best = v; at = z; }
-  }
-  return { zone: META.zones[at],
-           value: best * META.cycles[S.scope].scales[measure] };
+   situe l'heure dans la journée. Elle se lit sur la courbe déjà calculée. */
+function cycleAverage(key) {
+  const v = cellSeries(key);
+  let s = 0;
+  for (const x of v) { s += x; }
+  return v.length ? s / v.length : 0;
 }
 
 const ROLL_MS = 420, STAGGER = 70;
@@ -1214,28 +1310,23 @@ function signed(ratio) {
 }
 
 function onState() {
-  let rank = 0;
-  for (const key of ["perride", "revenue", "distance"]) {
-    const v = cityValue(S.step, key);
-    const avg = cycleAverage(key);
+  CELLS.forEach((key, rank) => {
     const cell = document.getElementById("c-" + key);
-    const delay = rank++ * STAGGER;
+    const avg = cycleAverage(key);
+    const render = cellFormat(key);
+    const delay = rank * STAGGER;
+    /* La case liée au panneau allumé prend la brique, comme le panneau et
+       comme la barre du présent dans le ruban : trois endroits, une seule
+       couleur pour dire « c'est ceci que vous avez choisi ». */
     cell.querySelector(".k-val").style.color =
-      key === S.measure ? C.brick : C.ink;
-    rollCell(cell.querySelector(".k-val"), key, v,
-             key === "perride"
-               ? x => "$" + x.toFixed(2).replace(".", ",")
-               : x => fmt(x, key),
-             delay);
-    rollCell(cell.querySelector(".k-sub"), key + "/sub", v,
+      key === "pick" ? C.brick : C.ink;
+    setCell(cell.querySelector(".k-lab"), cellLabel(key));
+    rollCell(cell.querySelector(".k-val"), key, cellValue(key, S.step),
+             render, delay);
+    rollCell(cell.querySelector(".k-sub"), key + "/sub",
+             cellValue(key, S.step),
              x => (avg ? signed(x / avg) + " vs moyenne" : ""), delay);
-  }
-  const t = topZone(S.step, S.measure);
-  const cell = document.getElementById("c-top");
-  cell.querySelector(".k-val").style.color = C.ink;
-  setCell(cell.querySelector(".k-val"), t.zone.name);
-  rollCell(cell.querySelector(".k-sub"), "top/sub", t.value,
-           x => t.zone.borough + " · " + fmt(x, S.measure), rank * STAGGER);
+  });
 }
 </script>
 """
