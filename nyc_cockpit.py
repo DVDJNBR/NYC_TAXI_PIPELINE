@@ -44,7 +44,7 @@ import nyc_live
 # iframes de taille fixe : sans ces valeurs, deux blocs voisins ne s'alignent
 # pas.
 H_TOP = 170
-H_CONTROLS = 54
+H_CONTROLS = 70
 H_BOTTOM = 440
 
 

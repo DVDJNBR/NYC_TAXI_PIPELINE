@@ -412,6 +412,17 @@ function fmt(v, measure) {
 const MEASURE_LABEL = { trips: "Courses", revenue: "Revenus",
                         distance: "Distance" };
 
+/* Ordre d'affichage des trois mesures, découplé de META.measures — qui est
+   l'ordre physique du binaire et ne peut pas bouger sans le réécrire.
+   Courses passe en dernier : c'est la mesure par défaut, mais le ruban juste
+   au-dessus la montre déjà barre par barre, donc elle n'a pas besoin de la
+   place où l'œil arrive d'abord. */
+const MEASURE_ORDER = ["revenue", "distance", "trips"];
+function measuresInOrder() {
+  const known = MEASURE_ORDER.filter(k => META.measures.indexOf(k) >= 0);
+  return known.concat(META.measures.filter(k => MEASURE_ORDER.indexOf(k) < 0));
+}
+
 /* L'iframe est servie en srcdoc : son URL de base ne mène nulle part et une
    requête relative échouerait. La page hôte est de même origine, on y lit
    l'adresse des fichiers statiques. */
@@ -531,15 +542,30 @@ def _controls_body() -> str:
 
     Ce sont eux qui disent où l'on va dans les données : la mesure à gauche,
     le pas du cycle à droite. De jour ils prennent la signalisation qu'on lit
-    en roulant sur le Brooklyn-Queens Expressway — un portique d'acier, la
+    en roulant sur le Brooklyn-Queens Expressway — une armature d'acier, la
     destination en cours sur tôle verte, les autres sur plaque blanche, et la
-    flèche noire qui n'apparaît qu'au survol. Un panneau blanc indique ; il
+    flèche de voie qui n'apparaît qu'au survol. Un panneau blanc indique ; il
     n'oriente que lorsqu'on le regarde.
 
-    Les plaques sont posées sur le portique et non suspendues en dessous :
-    une poutre passe derrière leur bord haut, visible dans les intervalles et
-    aux deux extrémités, où les montants descendent. C'est ainsi que les
-    panneaux tiennent au-dessus d'une voie rapide.
+    Les trois groupes pendent d'un seul portique et non d'un portique chacun :
+    c'est un assemblage qu'on voit sur une voie rapide, pas trois poteaux
+    plantés côte à côte. L'armature est un treillis — deux membrures et leurs
+    diagonales croisées — parce qu'une barre lisse fait du plastique, et elle
+    passe derrière le bord haut des plaques, visible dans les intervalles,
+    avec les montants qui descendent aux deux bouts.
+
+    Le pas courant est du mobilier lui aussi, mais pas un panneau : ce n'est
+    pas une destination. C'est une borne, posée entre les voies, au bas du
+    rail — un fût à sommet arrondi, bande de couleur en tête, chiffre en
+    noir. Les plaques pendent du portique, la borne tient au sol.
+
+    Les six plaques ont une seule taille, le mot centré dessus : une travée
+    se commande en série, et six largeurs au gabarit du texte faisaient six
+    objets là où il n'y en a qu'un, répété.
+
+    Les flèches sont celles d'une affectation de voies : bas-gauche, bas,
+    bas-droite, posées sous le mot et non à côté. Elles disent que les trois
+    plaques d'un même groupe sont trois sorties d'un même embranchement.
 
     De nuit, pas de portique : un panneau rétroréfléchissant sans phare pour
     l'éclairer n'est qu'une plaque grise. La ligne garde alors le cerclage
@@ -550,72 +576,150 @@ def _controls_body() -> str:
     p = nyc_theme.palette()
     accent = p["ACCENT"]
 
-    # Montants du portique : le même métal que la poutre, pris dans l'autre
-    # sens. Un dégradé vertical sur une barre verticale ferait un tube uni.
+    # Montants du portique : le même métal que les membrures, pris dans
+    # l'autre sens. Un dégradé vertical sur une barre verticale ferait un
+    # tube uni.
     post = ("linear-gradient(to right, #86868f 0%, #cbcbd3 44%,"
             " #a3a3ac 56%, #767680 100%)")
 
+    # Le treillis : deux nappes de diagonales en sens inverse, serrées entre
+    # les membrures. L'une plus claire que l'autre, parce qu'une diagonale qui
+    # monte et une qui descend ne prennent pas la même lumière — à valeur
+    # égale, le croisillon se lirait comme une trame imprimée.
+    def lattice(angle, colour):
+        return (f"repeating-linear-gradient({angle}deg,"
+                f" transparent 0 5.5px, {colour} 5.5px 7.5px,"
+                " transparent 7.5px 13px)")
+
+    chord = m["metal"]
+    truss = f"{chord}, {chord}, {lattice(56, '#c2c2ca')}, {lattice(-56, '#9a9aa4')}"
+
     gantry = "" if dark else f"""
-  .set {{ padding: 7px 11px 9px; }}
+  #rail {{ align-items: flex-start; }}
+  /* Deux portiques de trois plaques, pas une travée qui traverse tout : ce
+     qu'on mesure et le pas du cycle sont deux embranchements distincts, et
+     une poutre continue entre les deux en aurait fait un seul.
+
+     Chaque groupe débord de ses plaques : l'écart latéral laisse voir le
+     bout de la poutre et le montant qui y descend. Sans lui, l'armature
+     était un objet dont on ne voyait jamais les extrémités.
+
+     La poutre passe à mi-hauteur des plaques. C'est là qu'elle est sur une
+     vraie travée : les panneaux sont boulonnés devant elle, pas pendus
+     dessous, et c'est le bandeau visible dans les intervalles qui dit
+     qu'elle continue derrière. */
+  .set {{ padding: 0 15px; }}
   .set::before {{
-      content: ""; position: absolute; inset: 0;
-      background-image: {m['metal']}, {post}, {post};
-      background-size: 100% 5px, 4px calc(100% - 10px), 4px calc(100% - 10px);
-      background-position: left 10px, left 10px, right 10px;
-      background-repeat: no-repeat;
-      opacity: 0.85;
+      content: ""; position: absolute; left: 0; right: 0; top: 16px;
+      height: 13px;
+      background-image: {truss};
+      background-size: 100% 3px, 100% 3px, 100% 7px, 100% 7px;
+      background-position: top left, bottom left, left 3px, left 3px;
+      background-repeat: repeat-x;
+      opacity: 0.9;
       z-index: 0; }}
+  /* Les montants descendent des bouts de la poutre et passent plus bas que
+     les plaques : un portique tient au sol, pas dans l'air. */
+  .set::after {{
+      content: ""; position: absolute; left: 0; right: 0;
+      top: 18px; bottom: -7px;
+      background-image: {post}, {post};
+      background-size: 5px 100%, 5px 100%;
+      background-position: left top, right top;
+      background-repeat: no-repeat;
+      opacity: 0.9;
+      z-index: 0; }}
+  /* Une travée se commande en une seule taille : six plaques identiques,
+     le mot centré dessus. Des largeurs au gabarit du texte faisaient six
+     objets différents là où il n'y a qu'une série. */
+  .sign {{ box-sizing: border-box; width: 92px; text-align: center;
+          padding: 9px 4px 22px; }}
 """
 
     # De jour la plaque porte sa propre matière : joncs chromés sertis en haut
-    # et en bas, tôle verte entre les deux. De nuit il n'y a pas de plaque,
+    # et en bas, tôle peinte entre les deux. De nuit il n'y a pas de plaque,
     # mais un phare : le faisceau sous le mot et le cerclage qui le projette.
-    on_face = ("" if dark else
-               f"background-image: {m['metal_band']}, {m['metal_band']},"
-               f" {m['sign_face']};"
-               " background-size: 100% 3px, 100% 3px, 100% 100%;"
-               " background-position: top left, bottom left, center;"
-               " background-repeat: no-repeat;"
-               " border-color: transparent;")
-    on_ink = accent if dark else m["sign_ink"]
+    #
+    # Les joncs sont la pièce, pas la décoration de l'actif : deux panneaux
+    # d'un même portique sont sertis pareil, et seule la tôle entre les joncs
+    # change de couleur.
+    WHITE_FACE = ("linear-gradient(152deg, #ffffff 0%, #f6f6f4 46%,"
+                  " #ececeb 100%)")
 
-    # Au repos : de nuit, rien que le mot ; de jour, la même plaque que la
-    # verte, en blanc. Les joncs chromés sont la pièce, pas la décoration de
-    # l'actif : deux panneaux d'un même portique sont serties pareil, et seule
-    # la tôle entre les joncs change de couleur.
-    off_face = ("" if dark else
-                f"background-image: {m['metal_band']}, {m['metal_band']},"
-                " linear-gradient(152deg, #ffffff 0%, #f6f6f4 46%,"
-                " #ececeb 100%);"
+    def plate(face):
+        if dark:
+            return ""
+        return (f"background-image: {m['metal_band']}, {m['metal_band']},"
+                f" {face};"
                 " background-size: 100% 3px, 100% 3px, 100% 100%;"
                 " background-position: top left, bottom left, center;"
                 " background-repeat: no-repeat;"
                 " border-color: transparent;")
+
+    on_face = plate(m["sign_face"])
+    on_ink = accent if dark else m["sign_ink"]
+    off_face = plate(WHITE_FACE)
     off_ink = p["TEXT_DIM"] if dark else "#15151a"
 
-    # La flèche de panneau, réservée dès le repos : elle n'apparaît qu'au
-    # survol, mais sa place est tenue, sinon six boutons se décalent au
-    # passage de la souris.
+    # Le pas courant n'est pas une destination : il n'a donc pas de plaque.
+    # Il est posé entre les voies, à l'endroit où l'on trouve une borne — un
+    # fût trapu à sommet arrondi, bande de couleur en tête, chiffre en noir.
+    # Et une borne tient au sol : elle descend au bas du rail quand les
+    # panneaux pendent du portique.
+    STONE = ("linear-gradient(100deg, #fbfaf7 0%, #efede8 52%,"
+             " #e2dfd8 100%)")
+    clock = ("" if dark else f"""
+  #clock {{ align-self: flex-end; align-items: flex-end; gap: 8px; }}
+  #now {{ position: relative; z-index: 1; box-sizing: border-box;
+         width: 52px; min-width: 0; padding: 13px 0 5px;
+         text-align: center; font-size: 0.9rem; font-weight: 800;
+         text-transform: uppercase; letter-spacing: 0.02em; color: #15151a;
+         border-radius: 10px 10px 2px 2px;
+         background-image: linear-gradient(to bottom,
+             {p['BRICK']} 0%, color-mix(in srgb, {p['BRICK']} 82%, #000) 100%),
+             {STONE};
+         background-size: 100% 9px, 100% 100%;
+         background-position: top left, center;
+         background-repeat: no-repeat; }}
+  #play {{ position: relative; z-index: 1; width: 24px; flex: 0 0 24px;
+          padding: 3px 0; font-size: 0.64rem; border-radius: 2px;
+          background: {STONE}; color: #2a2a31;
+          border: 1px solid rgba(21, 21, 26, 0.22); }}
+""")
+
+    # Les flèches d'affectation de voie, sous le mot et non à côté : elles
+    # disent que les trois plaques d'un groupe sont trois sorties d'un même
+    # embranchement. Bas-gauche, bas, bas-droite, dans l'ordre d'affichage.
     #
-    # Elle entre par la droite, d'où vient la circulation : la flèche glisse
-    # jusqu'à sa place sous le mot au lieu d'y apparaître. `scaleX(-1)`
-    # retourne le masque, donc un `translateX` négatif la pose à droite ;
-    # les transformations s'appliquent de droite à gauche.
+    # Leur place est tenue dès le repos, sinon six boutons se décalent au
+    # passage de la souris. Elles descendent de quelques pixels en
+    # apparaissant : une flèche de voie se lit de haut en bas.
+    #
+    # Un seul masque pour les trois : le glyphe pointe à droite, la rotation
+    # fait le reste. 45° pour bas-droite, 90° pour bas, 135° pour bas-gauche —
+    # une rotation CSS tourne dans le sens des aiguilles.
+    TURN = {"i0": 135, "i1": 90, "i2": 45}
+    lanes = "".join(f"""
+  .sign.{k}::after {{ transform: translateY(-5px) rotate({a}deg); }}
+  .sign.{k}:hover::after, .sign.{k}.on::after {{
+      transform: translateY(0) rotate({a}deg); }}
+  @media (prefers-reduced-motion: reduce) {{
+      .sign.{k}::after {{ transform: rotate({a}deg); }} }}"""
+                    for k, a in TURN.items())
+
     arrow = "" if dark else f"""
   .sign::after {{
-      content: ""; display: inline-block;
-      width: 15px; height: 8px; margin-left: 8px;
-      vertical-align: 0.06em;
-      transform: scaleX(-1) translateX(-10px);
+      content: ""; position: absolute;
+      left: 50%; bottom: 7px; width: 15px; height: 15px; margin-left: -7.5px;
       background-color: currentColor;
       -webkit-mask: {m['arrow']};
       mask: {m['arrow']};
       opacity: 0;
       transition: opacity 0.16s ease, transform 0.26s cubic-bezier(0.22,0.7,0.3,1); }}
-  .sign:hover::after, .sign.on::after {{
-      opacity: 1; transform: scaleX(-1) translateX(0); }}
+  .sign:hover::after, .sign.on::after {{ opacity: 1; }}
+  {lanes}
   @media (prefers-reduced-motion: reduce) {{
-      .sign::after {{ transform: scaleX(-1); transition: opacity 0.16s ease; }} }}
+      .sign::after {{ transition: opacity 0.16s ease; }} }}
 """
 
     # Les deux matières de nuit — cerclage chromé et clignotant — n'existent
@@ -765,16 +869,25 @@ def _controls_body() -> str:
   /* Une seule ligne, trois groupes écartés aux extrémités : ce qu'on mesure
      à gauche, l'horloge au milieu, le pas du cycle à droite. L'écart suffit
      à les distinguer — ni intitulé « Cycle », ni intitulé « Mesure », qui ne
-     faisaient que nommer ce que les mots disaient déjà. */
+     faisaient que nommer ce que les mots disaient déjà.
+
+     Le rail porte le portique : c'est lui qui donne au treillis sa largeur
+     et aux montants leurs deux bouts. Les plaques pendent de son bord haut,
+     donc elles s'alignent par le haut et non par le milieu — des panneaux
+     d'inégale profondeur sur une même poutre, pas trois boutons centrés. */
   #wrap {{ position: absolute; inset: 0; display: flex; align-items: center;
-          justify-content: space-between; padding: 0 2px; }}
+          padding: 0 2px; }}
+  #rail {{ position: relative; flex: 1 1 auto; display: flex;
+          align-items: center; justify-content: space-between; }}
   #clock {{ display: flex; align-items: center; gap: 10px; }}
-  .set {{ position: relative; display: flex; align-items: center; gap: 6px; }}
+  .set {{ position: relative; z-index: 1; display: flex;
+         align-items: flex-start; gap: 6px; }}
   .sign {{ position: relative; z-index: 1; border: 1px solid transparent;
           background: none; cursor: pointer; font: inherit;
-          font-size: 0.72rem; font-weight: {'600' if dark else '700'};
+          font-size: 0.72rem; font-weight: {'600' if dark else '800'};
           text-transform: uppercase; letter-spacing: 0.07em;
-          padding: 6px 12px; border-radius: 2px;
+          border-radius: 2px;
+          padding: {'6px 12px' if dark else '8px 14px 22px'};
           color: {off_ink};
           transition: color 0.18s ease;
           {off_face} }}
@@ -784,22 +897,27 @@ def _controls_body() -> str:
   {lamp_ink}
   .sign.on:hover {{ color: {on_ink}; }}
   .sign:not(.on):hover {{ color: {p['TEXT_LIGHT'] if dark else '#15151a'}; }}
-  {gantry}
-  {arrow}
-  {night}
   #play {{ font: inherit; font-size: 0.72rem; cursor: pointer; width: 30px;
-          padding: 5px 0; border-radius: 3px; flex: 0 0 30px; }}
+          padding: 5px 0; border-radius: 3px; flex: 0 0 30px;
+          background: {p['BG_PANEL']}; color: {p['TEXT_LIGHT']};
+          border: 1px solid {p['RULE']}; }}
   #now {{ font-size: 1.15rem; font-weight: 600;
          font-variant-numeric: tabular-nums; min-width: 72px;
-         text-align: right; }}
+         text-align: right; color: {p['TEXT_LIGHT']}; }}
+  {gantry}
+  {clock}
+  {arrow}
+  {night}
 </style>
 <div id="wrap">
-  <div id="measures" class="set"></div>
-  <div id="clock">
-    <div id="now"></div>
-    <button id="play"></button>
+  <div id="rail">
+    <div id="measures" class="set"></div>
+    <div id="clock">
+      <div id="now"></div>
+      <button id="play"></button>
+    </div>
+    <div id="scopes" class="set"></div>
   </div>
-  <div id="scopes" class="set"></div>
 </div>
 """
         + _CONTROLS_JS
@@ -809,9 +927,12 @@ _CONTROLS_JS = r"""
 <script>
 let timer = null;
 
-function sign(label, active, onclick) {
+/* Le rang sert à la flèche de voie : bas-gauche, bas, bas-droite. Il est
+   porté par une classe et non par un style en ligne, pour que la règle de
+   survol et celle du repos vivent au même endroit que le reste du panneau. */
+function sign(label, active, i, onclick) {
   const b = document.createElement("button");
-  b.className = "sign" + (active ? " on" : "");
+  b.className = "sign i" + i + (active ? " on" : "");
   b.textContent = label;
   b.onclick = onclick;
   return b;
@@ -820,25 +941,25 @@ function sign(label, active, onclick) {
 function paintButtons() {
   const sc = document.getElementById("scopes");
   sc.innerHTML = "";
-  for (const k of Object.keys(META.cycles)) {
-    sc.appendChild(sign(META.cycles[k].label, S.scope === k, () => {
+  Object.keys(META.cycles).forEach((k, i) => {
+    sc.appendChild(sign(META.cycles[k].label, S.scope === k, i, () => {
       S.scope = k; S.step = 0; S.at = Date.now(); publish();
     }));
-  }
+  });
   const me = document.getElementById("measures");
   me.innerHTML = "";
-  for (const m of META.measures) {
-    me.appendChild(sign(MEASURE_LABEL[m], S.measure === m, () => {
+  measuresInOrder().forEach((m, i) => {
+    me.appendChild(sign(MEASURE_LABEL[m], S.measure === m, i, () => {
       S.measure = m; publish();
     }));
-  }
+  });
   /* Le pas courant est écrit en clair : le ruban le montre aussi, mais le
-     lire ici évite de chercher quelle barre porte l'accent. */
+     lire ici évite de chercher quelle barre porte l'accent.
+     En abrégé, parce qu'une borne porte une marque courte et non une
+     phrase — « 18H », « MAR », « JUIL ». Le cycle actif est lu juste à
+     côté, donc rien n'est ambigu. */
   document.getElementById("now").textContent =
-    META.cycles[S.scope].labels[S.step];
-  /* Le pas affiché est un repère, pas une mesure : il prend l'encre.
-     En jaune il concurrençait les taxis, qui portent la donnée. */
-  document.getElementById("now").style.color = C.ink;
+    META.cycles[S.scope].short[S.step];
   document.getElementById("play").textContent = S.playing ? "❚❚" : "▶";
 }
 
@@ -863,8 +984,6 @@ function schedule() {
 function boot() {
   S.scope = CFG.scope; S.measure = CFG.measure;
   const p = document.getElementById("play");
-  p.style.background = C.panel; p.style.color = C.ink;
-  p.style.border = "1px solid " + C.rule;
   p.onclick = () => {
     S.playing = !S.playing;
     S.at = Date.now();
