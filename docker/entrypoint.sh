@@ -32,6 +32,15 @@ if [ ! -f /app/data/aggregates/zone_cycle.parquet ] \
     python scripts/J_build_cycles.py
 fi
 
+# La maquette de ville, posée avant le premier visiteur. _serve_city() la
+# copie aussi, mais depuis Python, donc seulement quand un rendu du cockpit
+# appelle meta() : jusque-là static/ est vide et la carte n'a pas ses tours.
+# Le conteneur recrée static/ à chaque démarrage, d'où la copie ici plutôt
+# qu'une vérification d'existence. cp -f et non cp -n : la source versionnée
+# fait foi, une copie laissée par un conteneur précédent peut être périmée.
+mkdir -p /app/static
+cp -f /app/data/reference/nyc_city.json /app/static/nyc_city.json 2>/dev/null || true
+
 exec streamlit run streamlit_dashboard_local.py \
     --server.port=8501 \
     --server.address=0.0.0.0 \
