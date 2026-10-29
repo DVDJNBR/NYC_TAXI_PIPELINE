@@ -69,19 +69,22 @@ def render():
 
     nyc_live.controls(height=H_CONTROLS)
 
+    # Les deux blocs du bas portent un titre et la légende des secteurs,
+    # rien d'autre. Une phrase d'explication se replie sur deux lignes d'un
+    # côté et trois de l'autre selon la largeur : les deux dessins ne
+    # commençaient alors pas à la même hauteur, et la paire se décrochait.
+    # Même titre sur une ligne, même légende en bas, donc même surface
+    # utile — c'est ce qui les aligne.
     city, trips = st.columns([3, 2], gap="medium")
     with city:
         nyc_live.taxi_city(
             height=H_BOTTOM,
-            title="New York au pas de l'horloge",
-            hint="Un taxi vaut une course. En vol : il rejoint un axe, "
-                 "traverse, se disperse. Posé : il reste dans sa zone.",
+            title="Les flux de courses entre zones new-yorkaises",
+            legend=True,
         )
     with trips:
         nyc_live.flows(
             height=H_BOTTOM,
-            title="D'où l'on part, où l'on arrive",
-            hint="Manhattan coupé en quatre, du sud au nord : à l'échelle de "
-                 "l'arrondissement, 83 % des courses ne bougeaient pas. "
-                 "Trajets internes à un secteur écartés.",
+            title="Les échanges de courses entre secteurs",
+            legend=True,
         )

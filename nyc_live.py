@@ -307,7 +307,8 @@ def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
                     height=height, scrolling=False)
 
 
-def taxi_city(height: int = 460, title: str = "", hint: str = "") -> None:
+def taxi_city(height: int = 460, title: str = "",
+              hint: str = "", legend: bool = False) -> None:
     """La maquette de New York, un taxi par course.
 
     Les tours posent le sol et ne portent aucune donnée : elles situent. Ce
@@ -318,7 +319,7 @@ def taxi_city(height: int = 460, title: str = "", hint: str = "") -> None:
     head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
             if nyc_theme.mode() == "dark" else
             _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
-    components.html(_html(_CITY, _cfg(head=head)),
+    components.html(_html(_CITY, _cfg(head=head, legend=legend)),
                     height=height, scrolling=False)
 
 
@@ -329,11 +330,13 @@ def profile(height: int = 240, title: str = "", hint: str = "") -> None:
                     height=height, scrolling=False)
 
 
-def flows(height: int = 300, title: str = "", hint: str = "") -> None:
+def flows(height: int = 300, title: str = "", hint: str = "",
+          legend: bool = False) -> None:
     """Les flux entre arrondissements, nœuds figés, rubans animés."""
     meta()
-    components.html(_html(_FLOWS, _cfg(head=_head(title, hint))),
-                    height=height, scrolling=False)
+    components.html(
+        _html(_FLOWS, _cfg(head=_head(title, hint), legend=legend)),
+        height=height, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +364,21 @@ _SHELL = r"""
           pointer-events: none; line-height: 1.3; }
   #head b { display: block; font-size: 0.88rem; font-weight: 600; }
   #head i { display: block; font-size: 0.72rem; font-style: normal; }
+  /* La légende vit au bas de l'iframe, en surimpression, pour la même
+     raison que le titre. Les deux blocs du bas portent la même : ce sont
+     les mêmes secteurs dans les mêmes couleurs, et c'est elle qui fait que
+     la carte et le ruban se lisent ensemble. */
+  #legend { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+            pointer-events: none; display: flex; flex-wrap: wrap;
+            gap: 2px 11px; font-size: 0.66rem; line-height: 1.3; }
+  #legend span { display: inline-flex; align-items: center; gap: 5px;
+                 white-space: nowrap; }
+  #legend i { width: 8px; height: 8px; border-radius: 2px;
+              flex: 0 0 auto; }
 </style>
 <div id="load">…</div>
 <div id="head"></div>
+<div id="legend"></div>
 <div id="tip"></div>
 <script>
 const CFG = __CFG__;
@@ -389,6 +404,24 @@ const HEAD_EL = document.getElementById("head");
   measure();
   window.addEventListener("resize", measure);
 })();
+
+/* Pendant de HEAD, en bas. La légende se replie sur une, deux ou trois
+   lignes selon la largeur du bloc, donc sa hauteur se mesure. Pas `FOOT` :
+   la maquette de ville nomme déjà ainsi l'empreinte au sol de ses tours, et
+   deux déclarations du même nom au premier niveau du script faisaient
+   tomber le composant entier. */
+let LEGH = 0;
+const LEG_EL = document.getElementById("legend");
+function drawLegend() {
+  if (!CFG.legend || !META.areas) { LEG_EL.remove(); return; }
+  LEG_EL.innerHTML = META.areas.map(n =>
+    '<span><i style="background:' + (META.areaColors[n] || C.dim)
+    + '"></i>' + n + "</span>").join("");
+  LEG_EL.style.color = (CFG.head && CFG.head.dim) || C.dim;
+  const measure = () => { LEGH = LEG_EL.offsetHeight + 8; };
+  measure();
+  window.addEventListener("resize", measure);
+}
 
 const TIP = document.getElementById("tip");
 TIP.style.background = C.panel;
@@ -493,6 +526,7 @@ async function load() {
       LOWS[scope][m] = lo < hi ? lo : 0;
     }
   }
+  drawLegend();
   READY = true;
   const el = document.getElementById("load");
   if (el) { el.remove(); }
@@ -2133,9 +2167,10 @@ function layout() {
   /* Le titre est en surimpression : les nœuds commencent sous lui, sinon le
      plus haut des deux côtés passe derrière le texte. */
   const padTop = pad + HEAD;
+  const padBot = pad + LEGH;
   const place = (list, side) => {
     const sum = list.reduce((a, b) => a + total[side + b], 0) || 1;
-    const usable = h - padTop - pad - gap * (list.length - 1);
+    const usable = h - padTop - padBot - gap * (list.length - 1);
     let y = padTop;
     const out = {};
     for (const b of list) {
