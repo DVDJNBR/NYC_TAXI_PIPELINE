@@ -31,6 +31,19 @@ jobs:
           username: deploy
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /home/ubuntu/NYC_TAXI_PIPELINE
             git pull origin main
+            # Le conteneur porte un nom fixe (container_name dans
+            # docker-compose.yml). Dès que compose en perd la trace — un
+            # recreate interrompu, un `up` lancé depuis un autre dossier,
+            # un projet renommé — il le recrée et bute sur son propre nom :
+            #   Conflict. The container name "/nyc-taxi-dashboard" is
+            #   already in use by container "..."
+            # Deux déploiements de suite ont échoué là-dessus. On enlève donc
+            # ce qui porte le nom avant de remonter, au lieu de le nettoyer
+            # à la main à chaque fois. Les deux commandes ne doivent pas
+            # faire échouer le script quand il n'y a rien à enlever.
+            docker compose down --remove-orphans || true
+            docker rm -f nyc-taxi-dashboard 2>/dev/null || true
             docker compose up --build -d
