@@ -77,11 +77,21 @@ MANHATTAN_BANDS = [
     (float("inf"), "Harlem & North"),
 ]
 
+# Les trois aéroports forment leur propre secteur. Dans le référentiel TLC
+# ce sont des zones ordinaires : JFK et LaGuardia tombent dans le Queens,
+# Newark dans sa propre valeur de service. Fondus dans leur arrondissement,
+# ils disparaissaient d'un diagramme où ils pèsent 7 % des courses — et ces
+# 7 % ne ressemblent à rien d'autre. Un vol n'est pas un déplacement urbain :
+# il part d'un point unique, à heure fixe, vers toute la ville.
+AIRPORT_AREA = "Airports"
+AIRPORT_IDS = {132: "Airports", 138: "Airports", 1: "Airports"}
+
 # Ordre des secteurs : Manhattan du sud au nord, puis les autres
-# arrondissements par volume. C'est lui qui range les nœuds du diagramme de
-# flux, où une suite géographique se suit mieux qu'un classement.
+# arrondissements par volume, et les aéroports en dernier. C'est lui qui
+# range les nœuds du diagramme de flux, où une suite géographique se suit
+# mieux qu'un classement.
 AREAS = [band for _, band in MANHATTAN_BANDS] + [
-    "Queens", "Brooklyn", "Bronx", "Staten Island", "EWR",
+    "Queens", "Brooklyn", "Bronx", "Staten Island", AIRPORT_AREA,
 ]
 
 # Les quatre bandes de Manhattan prennent la même matière — l'or de la marque —
@@ -95,12 +105,18 @@ AREAS = [band for _, band in MANHATTAN_BANDS] + [
 # valeurs d'une seule famille, pour qu'on lise encore un arrondissement et
 # non quatre. Les couleurs vives restent aux arrondissements voisins, qui
 # sont petits : c'est là qu'elles servent à distinguer.
+#
+# Les aéroports prennent un bleu-vert franc, la seule teinte saturée du jeu :
+# ils sont 7 % des courses et doivent se repérer d'un coup d'œil, sur le
+# ruban comme sur la carte, où ce sont eux qui portent les repères.
 AREA_COLORS = {
     "Downtown": "#585560",
     "Midtown": "#7e7a82",
     "Uptown": "#a8a29f",
     "Harlem & North": "#cfc8be",
-    **{b: c for b, c in BOROUGH_COLORS.items() if b != "Manhattan"},
+    AIRPORT_AREA: "#2f7d8c",
+    **{b: c for b, c in BOROUGH_COLORS.items()
+       if b not in ("Manhattan", "EWR")},
 }
 
 
@@ -130,7 +146,9 @@ def areas() -> dict:
     lat = _centroids()
     out = {}
     for zone_id, borough in boroughs().items():
-        if borough == "Manhattan":
+        if zone_id in AIRPORT_IDS:
+            out[zone_id] = AIRPORT_IDS[zone_id]
+        elif borough == "Manhattan":
             out[zone_id] = _band(lat.get(zone_id, 40.75))
         else:
             out[zone_id] = borough

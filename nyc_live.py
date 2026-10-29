@@ -131,7 +131,7 @@ def available() -> bool:
 # Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
 # changement de structure ne serait pas vu tant que les agrégats ne sont pas
 # reconstruits, et le composant lirait un fichier à l'ancien format.
-PAYLOAD_VERSION = 3
+PAYLOAD_VERSION = 4
 
 
 @st.cache_data(show_spinner=False)
@@ -1325,9 +1325,16 @@ const IN = 0.20, OUT = 0.80;  /* part du trajet passée à rejoindre l'axe    */
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 const SECTORS = [0, 1, 2, 3, 4, 5, 6];
-const TINT = [[120,114,140],[138,128,154],[112,110,138],[100,102,130],
-              [104,116,140],[126,114,136],[110,108,138],[104,118,128],
-              [116,116,134]];
+
+/* Le ruban et la carte nomment les mêmes neuf zones : ils en prennent donc
+   la même couleur, à deux intensités. Le ruban la porte pleine — entre neuf
+   nœuds, la couleur est sa seule distinction. La carte la ramène vers le
+   gris violacé de la maquette, parce que le jaune des taxis doit rester la
+   seule couleur vive au-dessus du sol. Même teinte des deux côtés : on
+   reconnaît une zone d'un bloc à l'autre sans relire son nom. */
+const SLAB = [116, 112, 138];
+const MUTE = 0.72;
+let TINT = null;
 
 function rgb(hex) {
   const h = String(hex).replace("#", "");
@@ -1337,7 +1344,7 @@ function rgb(hex) {
 /* Le sol de la carte est le fond de la page : le bloc n'est pas une fenêtre
    posée sur le tableau de bord, c'est le tableau de bord qui se soulève. */
 const SCENE_BG = rgb(C.bg);
-const GROUND_A = 30 / 255;
+const GROUND_A = 46 / 255;
 const LIFT = NIGHT ? [152, 148, 174] : [198, 195, 210];
 const LIFT_K = NIGHT ? [0.52, 0.34] : [0.26, 0.30];
 
@@ -1366,6 +1373,15 @@ function taxiAtlas() {
 const ATLAS = taxiAtlas();
 const MAPPING = { taxi: { x: 0, y: 0, width: 64, height: 64,
                           anchorX: 32, anchorY: 32, mask: false } };
+
+/* Les aéroports ne sont pas un secteur de la maquette : JFK et LaGuardia
+   tombent dans le polygone du Queens, Newark est hors cadre. Mais le ruban
+   les montre maintenant à part, et 7 % des courses y passent — un repère
+   sur la carte est ce qui relie les deux lectures. Un anneau, trois lettres,
+   dans la couleur du nœud. */
+const AIR_CODE = { "JFK Airport": "JFK", "LaGuardia Airport": "LGA",
+                   "Newark Airport": "EWR" };
+let AIRPORTS = [], AIR_RGB = [120, 120, 130];
 
 let CITY = null, POOL = null, GROUND = null, SPACED = null;
 let MOV = null, SIT = null, AXES = [], STATIC = [];
@@ -1522,7 +1538,11 @@ function staticLayers() {
     id: "ground", data: CITY.polys, extruded: false, filled: true,
     stroked: false, pickable: false,
     getPolygon: d => d.p,
-    getFillColor: d => [TINT[d.s][0], TINT[d.s][1], TINT[d.s][2], 30],
+    /* Le sol porte la couleur du nœud correspondant dans le ruban, assez
+       franchement pour qu'on fasse le rapprochement : un bloc dit quelles
+       liaisons, l'autre où elles tombent, et c'est la couleur qui les relie.
+       Elle reste sous le jaune des taxis, qui est la donnée en mouvement. */
+    getFillColor: d => [TINT[d.s][0], TINT[d.s][1], TINT[d.s][2], 58],
   }));
   out.push(new deck.PolygonLayer({
     id: "buildings", data: CITY.bld, extruded: true, filled: true,
@@ -1562,6 +1582,30 @@ function staticLayers() {
     getColor: NIGHT ? [214, 210, 230, 235] : [72, 68, 94, 230],
     parameters: { depthTest: false },
   }));
+  if (AIRPORTS.length) {
+    out.push(new deck.ScatterplotLayer({
+      id: "air-ring", data: AIRPORTS, pickable: false,
+      getPosition: d => [d.lon, d.lat, ALT + 160],
+      radiusUnits: "pixels", getRadius: 4.6,
+      stroked: true, filled: false, lineWidthUnits: "pixels",
+      getLineWidth: 1.5,
+      getLineColor: [AIR_RGB[0], AIR_RGB[1], AIR_RGB[2], 225],
+      parameters: { depthTest: false },
+    }));
+    out.push(new deck.TextLayer({
+      id: "air-text", data: AIRPORTS, pickable: false,
+      getPosition: d => [d.lon, d.lat, ALT + 160],
+      getText: d => d.code, getSize: 9, sizeUnits: "pixels",
+      getPixelOffset: [0, -14],
+      fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif",
+      fontWeight: 700,
+      fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
+      outlineWidth: 3.2,
+      outlineColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 222],
+      getColor: [AIR_RGB[0], AIR_RGB[1], AIR_RGB[2], 245],
+      parameters: { depthTest: false },
+    }));
+  }
   return out;
 }
 
@@ -1636,11 +1680,21 @@ async function boot() {
     }
     return a;
   });
+  TINT = CITY.order.map(name => {
+    const c = rgb(META.areaColors[name] || C.dim);
+    return [SLAB[0] + (c[0] - SLAB[0]) * MUTE,
+            SLAB[1] + (c[1] - SLAB[1]) * MUTE,
+            SLAB[2] + (c[2] - SLAB[2]) * MUTE];
+  });
   GROUND = TINT.map(c => [
     SCENE_BG[0] + (c[0] - SCENE_BG[0]) * GROUND_A,
     SCENE_BG[1] + (c[1] - SCENE_BG[1]) * GROUND_A,
     SCENE_BG[2] + (c[2] - SCENE_BG[2]) * GROUND_A]);
   SPACED = SHORT.map(n => n.toUpperCase().split("").join(" "));
+  AIRPORTS = META.zones
+    .filter(z => AIR_CODE[z.name])
+    .map(z => ({ code: AIR_CODE[z.name], lon: z.lon, lat: z.lat }));
+  AIR_RGB = rgb((META.areaColors || {})["Airports"] || C.dim);
   fatten();
   deckgl = new deck.DeckGL({
     container: "city",
