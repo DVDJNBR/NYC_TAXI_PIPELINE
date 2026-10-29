@@ -71,11 +71,11 @@ def render():
 
     city, trips = st.columns([3, 2], gap="medium")
     with city:
-        nyc_live.city_map(
+        nyc_live.taxi_city(
             height=H_BOTTOM,
             title="New York au pas de l'horloge",
-            hint="Hauteur et couleur d'une zone : la mesure choisie, au pas "
-                 "affiché.",
+            hint="Un taxi vaut une course. En vol : il rejoint un axe, "
+                 "traverse, se disperse. Posé : il reste dans sa zone.",
         )
     with trips:
         nyc_live.flows(

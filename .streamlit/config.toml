@@ -18,6 +18,11 @@
 # borderColor est donné en hexadécimal et non en rgba() : Streamlit n'accepte
 # pas la notation fonctionnelle. Les valeurs ci-dessous sont les anciens
 # rgba(255,255,255,0.12) et rgba(0,0,0,0.14) aplatis sur le fond de page.
+#
+# Les fonds sont ceux des deux autres projets, pour que les trois se tiennent :
+# le quasi-noir chaud du portfolio (#12100e) et le papier de watt-watcher
+# (#f7f5f2). Chaud des deux côtés, ce que demande un accent ambre — un gris
+# bleuté sous du jaune taxi fait virer l'ambre au vert.
 
 [theme]
 baseRadius = "small"
@@ -26,27 +31,27 @@ showWidgetBorder = true
 
 [theme.dark]
 primaryColor             = "#d9a441"
-backgroundColor          = "#101014"
-secondaryBackgroundColor = "#16161c"
-codeBackgroundColor      = "#1c1c23"
+backgroundColor          = "#12100e"
+secondaryBackgroundColor = "#181614"
+codeBackgroundColor      = "#221f1b"
 textColor                = "#e8e6e3"
 grayColor                = "#8b8794"
 greenColor               = "#5f9e6e"
 redColor                 = "#b5634f"
-borderColor              = "#2d2d30"
+borderColor              = "#2e2d2b"
 grayBackgroundColor      = "#3a3845"
 chartCategoricalColors   = ["#d9a441", "#8b8794", "#5f9e6e", "#b5634f", "#3a3845"]
 
 [theme.light]
 primaryColor             = "#a9741a"
-backgroundColor          = "#ffffff"
-secondaryBackgroundColor = "#f5f5f3"
-codeBackgroundColor      = "#ededea"
+backgroundColor          = "#f7f5f2"
+secondaryBackgroundColor = "#ffffff"
+codeBackgroundColor      = "#eeece6"
 textColor                = "#1b1b1f"
 grayColor                = "#6b6773"
 greenColor               = "#3f7d53"
 redColor                 = "#a04a33"
-borderColor              = "#dbdbdb"
+borderColor              = "#d4d3d0"
 grayBackgroundColor      = "#c9c7d0"
 chartCategoricalColors   = ["#a9741a", "#6b6773", "#3f7d53", "#a04a33", "#c9c7d0"]
 

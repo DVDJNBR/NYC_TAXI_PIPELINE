@@ -34,7 +34,7 @@ BOROUGHS = ["Manhattan", "Queens", "Brooklyn", "Bronx", "Staten Island", "EWR"]
 # Les autres restent dans des neutres chauds pour ne pas fabriquer six
 # accents concurrents.
 BOROUGH_COLORS = {
-    "Manhattan": "#d9a441",
+    "Manhattan": "#7e7a82",
     "Queens": "#7f9bb5",
     "Brooklyn": "#b58b6a",
     "Bronx": "#8f8aa6",
@@ -61,15 +61,20 @@ JFK, LGA, EWR = 132, 138, 1
 # connaît, elles se vérifient, et une republication du référentiel par la TLC
 # ne les périme pas.
 #
-#     14e rue     40.7375    Bas Manhattan  <- Financial District, Village
-#     59e rue     40.7685    Midtown        <- Times Sq, Grand Central, Chelsea
-#     110e rue    40.8000    Uptown         <- Upper East / West Side, Central Park
-#                            Harlem & nord  <- Harlem, Washington Heights, Inwood
+# Les noms de secteurs restent en anglais, comme les 263 noms de zones de la
+# TLC et comme les arrondissements : ce sont des toponymes, pas de l'interface.
+# « Midtown » ne se traduit pas, et traduire la moitié d'une liste en laissant
+# l'autre ferait deux référentiels pour un seul territoire.
+#
+#     14th St     40.7375    Downtown        <- Financial District, Village
+#     59th St     40.7685    Midtown         <- Times Sq, Grand Central, Chelsea
+#     110th St    40.8000    Uptown          <- Upper East / West Side, Central Park
+#                            Harlem & North  <- Harlem, Washington Heights, Inwood
 MANHATTAN_BANDS = [
-    (40.7375, "Bas Manhattan"),
+    (40.7375, "Downtown"),
     (40.7685, "Midtown"),
     (40.8000, "Uptown"),
-    (float("inf"), "Harlem & nord"),
+    (float("inf"), "Harlem & North"),
 ]
 
 # Ordre des secteurs : Manhattan du sud au nord, puis les autres
@@ -83,11 +88,18 @@ AREAS = [band for _, band in MANHATTAN_BANDS] + [
 # en quatre valeurs, du sud au nord. Quatre teintes étrangères en feraient
 # quatre arrondissements de plus ; une rampe dit qu'il s'agit d'un seul
 # territoire, découpé.
+# Manhattan tient les quatre cinquièmes des flux : en or, ses quatre bandes
+# faisaient virer tout le diagramme au jaune, et le jaune appartient aux
+# taxis. En brique, elles criaient. Elles prennent donc la matière des tours
+# elles-mêmes — granit sombre au sud, calcaire pâle au nord — en quatre
+# valeurs d'une seule famille, pour qu'on lise encore un arrondissement et
+# non quatre. Les couleurs vives restent aux arrondissements voisins, qui
+# sont petits : c'est là qu'elles servent à distinguer.
 AREA_COLORS = {
-    "Bas Manhattan": "#a97a2c",
-    "Midtown": "#d9a441",
-    "Uptown": "#e9c683",
-    "Harlem & nord": "#f3e2bd",
+    "Downtown": "#585560",
+    "Midtown": "#7e7a82",
+    "Uptown": "#a8a29f",
+    "Harlem & North": "#cfc8be",
     **{b: c for b, c in BOROUGH_COLORS.items() if b != "Manhattan"},
 }
 

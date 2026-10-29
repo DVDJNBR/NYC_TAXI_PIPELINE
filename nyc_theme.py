@@ -201,6 +201,13 @@ _LIT = {
 
 _GRID_LINE = {"dark": "rgba(255,255,255,0.07)", "light": "rgba(0,0,0,0.08)"}
 
+# La brique de New York, à côté du jaune du taxi. Streamlit n'a pas d'option
+# pour une seconde couleur de marque : celle-ci est donc dérivée ici, comme
+# GRID_LINE. Elle sert aux feux arrière des boutons du cockpit — un phare
+# éclaire devant, un feu rouge se voit derrière, et c'est la seule place où
+# un rouge n'annonce pas une mauvaise nouvelle.
+_BRICK = {"dark": "#c05f41", "light": "#a8503a"}
+
 # Alias historiques — DUSK_ORANGE et NIGHT_PURPLE retombent volontairement sur
 # le même neutre.
 _ALIASES = {
@@ -223,6 +230,7 @@ def _load(m: str) -> dict:
     theme = tomllib.loads(_CONFIG.read_text(encoding="utf-8"))["theme"][m]
     p = {name: theme[opt] for name, opt in _MAP.items()}
     p["GRID_LINE"] = _GRID_LINE[m]
+    p["BRICK"] = _BRICK[m]
     return p
 
 
@@ -271,6 +279,7 @@ def materials() -> dict:
     resolve = lambda css: css.replace("var(--nyc-accent)", accent)
     return {
         "mode": m,
+        "arrow": _SIGN_ARROW_MASK,
         "metal_band": _METAL_BAND,
         "sign_face": _SIGN_FACE,
         "sign_ink": _SIGN_INK,
@@ -748,8 +757,11 @@ def inject_css():
             order: 1;
             content: "";
             /* La marque tient seule contre le titre, sans barre latérale pour
-               l'encadrer : à 1,75 rem elle passait pour une puce. */
-            width: 2.2rem; height: 2.2rem;
+               l'encadrer : à 1,75 rem elle passait pour une puce, et à
+               2,2 rem elle se lisait encore comme une pastille à côté du
+               nom plutôt que comme la marque du tableau de bord. Le bandeau
+               fait 60 px : 3,2 rem en occupe la hauteur sans la toucher. */
+            width: 3.2rem; height: 3.2rem;
             background: {_LOGO_URI} center / contain no-repeat;
         }}
         .st-key-band::after {{
@@ -926,9 +938,13 @@ def inject_css():
             [data-testid="stMarkdownContainer"] p::after {{
             animation: nyc-arrow 0.2s ease-out;
         }}
+        /* Le jaune est celui du taxi : il reste aux taxis, sur la carte, et
+           aux lampes du cockpit, qui sont des feux. La navigation, elle, se
+           marque à l'encre et à la brique — sinon l'accent est partout et ne
+           désigne plus rien. */
         .st-key-navbar [data-testid="stRadioOption"]:has(input:checked) p {{
             opacity: 1;
-            color: {p['ACCENT']} !important;
+            color: {p['TEXT_LIGHT']} !important;
         }}
         /* Un filet sous l'onglet actif : la couleur seule ne suffit pas à
            trois intitulés serrés, et c'est le repère qu'un onglet porte
@@ -938,7 +954,7 @@ def inject_css():
             position: absolute;
             left: 0; right: 0; bottom: -7px;
             height: 2px; border-radius: 1px;
-            background: {p['ACCENT']};
+            background: {p['BRICK']};
         }}
 
         /* Déclencheur de rerun du bouton de thème : présent dans le DOM pour

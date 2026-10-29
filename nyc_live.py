@@ -100,16 +100,21 @@ MONTH_SHORT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin",
 #
 # Un cycle court a besoin d'un pas plus long : sept jours à une seconde
 # feraient une boucle de sept secondes, soit un battement plutôt qu'une
-# lecture. La boucle vise la vingtaine de secondes dans les trois cas.
+# lecture. La boucle vise la quarantaine de secondes dans les trois cas.
+#
+# Le pas tient maintenant une seconde et demie au moins : quatre nombres, une
+# carte et un ruban changent ensemble, et il faut le temps d'en lire un avant
+# que le suivant ne parte. Qui veut aller plus vite clique la barre voulue —
+# le ruban est devenu une règle, pas seulement un affichage.
 CYCLES = {
-    "hour": {"steps": 24, "ms": 1000, "label": "Heure",
+    "hour": {"steps": 24, "ms": 1700, "label": "Heure",
              "title": "Une journée type",
              "labels": [f"{h}h" for h in range(24)],
              "short": [f"{h}h" for h in range(24)]},
-    "dow": {"steps": 7, "ms": 1700, "label": "Jour",
+    "dow": {"steps": 7, "ms": 2800, "label": "Jour",
             "title": "Une semaine type", "labels": DOW_LABELS,
             "short": DOW_SHORT},
-    "month": {"steps": 12, "ms": 1400, "label": "Mois",
+    "month": {"steps": 12, "ms": 2400, "label": "Mois",
               "title": "Une année type", "labels": MONTH_LABELS,
               "short": MONTH_SHORT},
 }
@@ -252,6 +257,7 @@ def _cfg(**extra) -> str:
         "colors": {
             "bg": p["BG_PAGE"], "ink": p["TEXT_LIGHT"], "dim": p["TEXT_DIM"],
             "rule": p["RULE"], "accent": p["ACCENT"], "panel": p["BG_PANEL"],
+            "brick": p["BRICK"],
             "muted": p["BAR_MUTED"],
         },
         **extra,
@@ -292,10 +298,27 @@ VIEW = {"pitch": 50, "bearing": -18}
 def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
     """La carte à pics. Hauteur et couleur suivent la mesure du pas."""
     meta()
-    # Le titre est blanc : il se pose sur le fond de nuit de la carte, qui ne
-    # suit pas le thème de la page.
-    head = _head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
+    # Le titre se pose sur le sol de la carte, pas sur la page : il prend donc
+    # l'encre de ce sol — claire sur la ville de nuit, sombre sur celle de jour.
+    head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
+            if nyc_theme.mode() == "dark" else
+            _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
     components.html(_html(_MAP, _cfg(view=VIEW, head=head)),
+                    height=height, scrolling=False)
+
+
+def taxi_city(height: int = 460, title: str = "", hint: str = "") -> None:
+    """La maquette de New York, un taxi par course.
+
+    Les tours posent le sol et ne portent aucune donnée : elles situent. Ce
+    qui porte la donnée est le jaune, et lui seul — d'où une carte en gris
+    violacé où rien d'autre n'est chaud.
+    """
+    meta()
+    head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
+            if nyc_theme.mode() == "dark" else
+            _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
+    components.html(_html(_CITY, _cfg(head=head)),
                     height=height, scrolling=False)
 
 
@@ -504,41 +527,237 @@ __BODY__
 # Composant 1 — les boutons-panneaux, et l'horloge
 # ---------------------------------------------------------------------------
 def _controls_body() -> str:
-    """Les boutons du cockpit, dans la matière de la navigation latérale.
+    """Les boutons du cockpit, en signalisation de voie rapide.
 
-    Ils commandent ce que la barre commandait : autant qu'ils se lisent
-    pareil. Un seul bouton par rangée porte la matière — plaque de rue de
-    jour, cerclage chromé et faisceau de nuit — et les autres restent du
-    texte. Trois boutons en panneau vert côte à côte ne désignent plus rien :
-    c'est le contraste qui dit lequel est actif, pas la décoration.
+    Ce sont eux qui disent où l'on va dans les données : la mesure à gauche,
+    le pas du cycle à droite. De jour ils prennent la signalisation qu'on lit
+    en roulant sur le Brooklyn-Queens Expressway — un portique d'acier, la
+    destination en cours sur tôle verte, les autres sur plaque blanche, et la
+    flèche noire qui n'apparaît qu'au survol. Un panneau blanc indique ; il
+    n'oriente que lorsqu'on le regarde.
 
-    Le changement de chasse fait le survol : le mot passe en capitales
-    espacées, soit l'aperçu de la typographie qu'aura la plaque. De nuit il
-    s'y ajoute le clignotant — une destination où l'on n'est pas encore.
+    Les plaques sont posées sur le portique et non suspendues en dessous :
+    une poutre passe derrière leur bord haut, visible dans les intervalles et
+    aux deux extrémités, où les montants descendent. C'est ainsi que les
+    panneaux tiennent au-dessus d'une voie rapide.
+
+    De nuit, pas de portique : un panneau rétroréfléchissant sans phare pour
+    l'éclairer n'est qu'une plaque grise. La ligne garde alors le cerclage
+    chromé et le faisceau ambré du phare, et le clignotant au survol.
     """
     m = nyc_theme.materials()
     dark = m["mode"] == "dark"
     p = nyc_theme.palette()
     accent = p["ACCENT"]
 
-    def beam(near, mid, far):
-        """Faisceau vertical : il monte du jonc chromé vers le libellé."""
-        return (f"linear-gradient(to top,"
-                f" color-mix(in srgb, {accent} {near}%, transparent) 0%,"
-                f" color-mix(in srgb, {accent} {mid}%, transparent) 46%,"
-                f" color-mix(in srgb, {accent} {far}%, transparent) 78%,"
-                f" transparent 100%)")
+    # Montants du portique : le même métal que la poutre, pris dans l'autre
+    # sens. Un dégradé vertical sur une barre verticale ferait un tube uni.
+    post = ("linear-gradient(to right, #86868f 0%, #cbcbd3 44%,"
+            " #a3a3ac 56%, #767680 100%)")
+
+    gantry = "" if dark else f"""
+  .set {{ padding: 7px 11px 9px; }}
+  .set::before {{
+      content: ""; position: absolute; inset: 0;
+      background-image: {m['metal']}, {post}, {post};
+      background-size: 100% 5px, 4px calc(100% - 10px), 4px calc(100% - 10px);
+      background-position: left 10px, left 10px, right 10px;
+      background-repeat: no-repeat;
+      opacity: 0.85;
+      z-index: 0; }}
+"""
 
     # De jour la plaque porte sa propre matière : joncs chromés sertis en haut
     # et en bas, tôle verte entre les deux. De nuit il n'y a pas de plaque,
     # mais un phare : le faisceau sous le mot et le cerclage qui le projette.
-    on_face = (f"background-image: {beam(26, 9, 3)};" if dark else
+    on_face = ("" if dark else
                f"background-image: {m['metal_band']}, {m['metal_band']},"
                f" {m['sign_face']};"
                " background-size: 100% 3px, 100% 3px, 100% 100%;"
                " background-position: top left, bottom left, center;"
-               " background-repeat: no-repeat;")
+               " background-repeat: no-repeat;"
+               " border-color: transparent;")
     on_ink = accent if dark else m["sign_ink"]
+
+    # Au repos : de nuit, rien que le mot ; de jour, la même plaque que la
+    # verte, en blanc. Les joncs chromés sont la pièce, pas la décoration de
+    # l'actif : deux panneaux d'un même portique sont serties pareil, et seule
+    # la tôle entre les joncs change de couleur.
+    off_face = ("" if dark else
+                f"background-image: {m['metal_band']}, {m['metal_band']},"
+                " linear-gradient(152deg, #ffffff 0%, #f6f6f4 46%,"
+                " #ececeb 100%);"
+                " background-size: 100% 3px, 100% 3px, 100% 100%;"
+                " background-position: top left, bottom left, center;"
+                " background-repeat: no-repeat;"
+                " border-color: transparent;")
+    off_ink = p["TEXT_DIM"] if dark else "#15151a"
+
+    # La flèche de panneau, réservée dès le repos : elle n'apparaît qu'au
+    # survol, mais sa place est tenue, sinon six boutons se décalent au
+    # passage de la souris.
+    #
+    # Elle entre par la droite, d'où vient la circulation : la flèche glisse
+    # jusqu'à sa place sous le mot au lieu d'y apparaître. `scaleX(-1)`
+    # retourne le masque, donc un `translateX` négatif la pose à droite ;
+    # les transformations s'appliquent de droite à gauche.
+    arrow = "" if dark else f"""
+  .sign::after {{
+      content: ""; display: inline-block;
+      width: 15px; height: 8px; margin-left: 8px;
+      vertical-align: 0.06em;
+      transform: scaleX(-1) translateX(-10px);
+      background-color: currentColor;
+      -webkit-mask: {m['arrow']};
+      mask: {m['arrow']};
+      opacity: 0;
+      transition: opacity 0.16s ease, transform 0.26s cubic-bezier(0.22,0.7,0.3,1); }}
+  .sign:hover::after, .sign.on::after {{
+      opacity: 1; transform: scaleX(-1) translateX(0); }}
+  @media (prefers-reduced-motion: reduce) {{
+      .sign::after {{ transform: scaleX(-1); transition: opacity 0.16s ease; }} }}
+"""
+
+    # Les deux matières de nuit — cerclage chromé et clignotant — n'existent
+    # qu'en thème sombre, et il ne suffit pas de vider leur `content` en
+    # thème clair : ces règles visent les mêmes pseudo-éléments que la
+    # flèche, et une déclaration plus spécifique l'effaçait au survol.
+    # De nuit, la barre est une voiture vue de dessus. À gauche ce qu'on
+    # mesure : les phares, lumière blanc chaud qui ouvre la route. À droite le
+    # pas du cycle : les feux arrière, rouge brique, qui ne projettent rien.
+    # Un phare et un feu rouge ne se confondent jamais, et c'est ce qui
+    # distingue les deux groupes sans leur donner deux géométries.
+    #
+    # L'optique reste celle de la barre latérale : cerclage chromé contre le
+    # mot, flaque qui décroît vers la gauche, poussières qui dérivent dans le
+    # faisceau. Le clignotant, lui, devient un feu de recul — blanc et fixe.
+    # Un clignotant annonce qu'on va tourner ; ici on regarde une destination
+    # qu'on n'a pas prise.
+    dust = m["dust"]
+    # Un feu arrière est franchement rouge : c'est une lampe derrière un
+    # verre teinté, pas un mur de brique.
+    tail = "#e23b27"
+    # Un phare n'est pas ambré : il est blanc à peine chaud. L'ambre, lui,
+    # reste la couleur des feux de la ville, pas celle de la lumière projetée.
+    front = "#fff2d4"
+    # Le mot n'est pas rouge : il est éclairé par du rouge. C'est donc un
+    # blanc qui a pris la teinte de la lampe, pas la lampe elle-même — un
+    # libellé à la saturation du verre se lisait comme une alerte.
+    tail_ink = "#f6b2a0"
+    reverse = "#f4f1ea"
+
+    def pool(colour, near, mid, mid_at, far, to="left"):
+        """Flaque de lumière : elle décroît du cerclage vers le mot.
+
+        La fin est écrite `color-mix(... 0%, transparent)` et non `transparent`
+        tout court : le mot-clé vaut `rgba(0,0,0,0)`, et interpoler vers lui
+        traverse du noir, ce qui laissait un trait au bout du dégradé. La
+        couleur de fin est donc la même teinte, à opacité nulle.
+
+        Elle s'éteint aussi avant le bord : une flaque qui touche l'arête du
+        bouton y dessine une ligne nette, et une lumière n'a pas d'arête.
+        """
+        out = f"color-mix(in srgb, {colour} 0%, transparent)"
+        return (f"linear-gradient(to {to},"
+                f" color-mix(in srgb, {colour} {near}%, transparent) 0%,"
+                f" color-mix(in srgb, {colour} {mid}%, transparent) {mid_at}%,"
+                f" {out} {far}%, {out} 100%)")
+
+    def lamp(colour, strong, soft):
+        """Halo d'une source ponctuelle : un proche dense, un large diffus."""
+        return (f"0 0 5px 0 color-mix(in srgb, {colour} {strong}%, transparent),"
+                f" 0 0 16px 3px color-mix(in srgb, {colour} {soft}%, transparent)")
+
+    # Le mot est éclairé par sa propre lampe : blanc chaud sous le phare,
+    # rouge sous le feu arrière. Un libellé ambré au-dessus d'un verre rouge
+    # disait deux lumières là où il n'y en a qu'une.
+    lamp_ink = "" if not dark else (
+        f"#measures .sign.on {{ color: {front}; }}"
+        f" #scopes .sign.on {{ color: {tail_ink}; }}")
+
+    night = "" if not dark else f"""
+  /* Le texte se tient contre le métal : la place du cerclage est réservée
+     sur tous les boutons, sinon ils se décalent en s'allumant. */
+  /* Pas de bordure de nuit : le fond est peint jusque sous elle, et ce
+     dernier pixel se lisait comme un filet le long du bouton. */
+  .sign {{ padding-right: 17px; background-color: transparent;
+          border: 0; padding-left: 13px; border-radius: 0;
+          background-clip: padding-box; }}
+  #measures .sign.on {{ background-image: {pool(front, 26, 9, 44, 92)}; }}
+  /* Pleins phares : survoler la ligne déjà active monte l'intensité. */
+  #measures .sign.on:hover {{ background-image: {pool(front, 42, 18, 48, 92)}; }}
+  /* Un feu arrière éclaire ses abords, il n'ouvre pas la route : sa flaque
+     s'arrête à 42 % de la largeur quand celle du phare va au bout. */
+  /* Le feu arrière éclaire vers l'arrière : la voiture regarde à gauche, la
+     lumière part donc vers la droite. Sa lampe est côté intérieur, comme
+     celle des phares, et les deux groupes éclairent vers l'extérieur. */
+  #scopes .sign {{ padding-left: 17px; padding-right: 13px; }}
+  #scopes .sign.on {{ background-image: {pool(tail, 58, 20, 16, 44, 'right')}; }}
+  #scopes .sign.on:hover {{ background-image: {pool(tail, 80, 30, 18, 48, 'right')}; }}
+  /* Les poussières dérivent dans le faisceau, sinon ce sont des taches. Elles
+     vivent sur leur propre couche pour que la lumière, elle, ne bouge pas.
+     Rien derrière un feu arrière : il n'y a pas de faisceau où voir voler
+     quoi que ce soit. */
+  /* La poussière est découpée par son propre dégradé et non par un
+     `overflow: hidden` sur le bouton : un coin arrondi qui rogne un fond
+     laisse une couture d'un pixel le long de l'arête. */
+  #measures .sign.on::before {{
+      content: ""; position: absolute; inset: 0 3px 0 0; pointer-events: none;
+      background-image: {dust['image']};
+      background-size: {dust['size']};
+      background-repeat: {dust['repeat']};
+      background-position: {dust['start']};
+      animation: nyc-dust 7s linear infinite alternate; }}
+  @keyframes nyc-dust {{
+      from {{ background-position: {dust['start']}; }}
+      to   {{ background-position: {dust['end']}; }} }}
+  /* Le cerclage est une pièce et non un trait : une épaisseur, des bouts
+     arrondis, un retrait haut et bas qui le détache du bord. Devant c'est du
+     chrome ; derrière, le verre rouge du feu, qui s'éclaire lui-même. */
+  .sign.on::after {{
+      content: ""; position: absolute;
+      top: 1px; bottom: 1px; right: 0; width: 3px; border-radius: 2px; }}
+  #measures .sign.on::after {{
+      background: {m['metal']};
+      box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08); }}
+  #scopes .sign.on::after {{
+      left: 0; right: auto;
+      background: {tail}; box-shadow: {lamp(tail, 85, 40)}; }}
+  /* À l'avant, le clignotant : survoler une destination où l'on ne va pas
+     encore, c'est signaler son intention d'y aller. Ambré, battant à 1,5 Hz —
+     la cadence d'un vrai feu, entre 60 et 120 battements par minute. */
+  #measures .sign:not(.on):hover::before {{
+      background-image: {pool(accent, 38, 15, 14, 28)};
+      animation: nyc-blink 0.68s linear infinite; }}
+  #measures .sign:not(.on):hover::after {{
+      background: {accent}; box-shadow: {lamp(accent, 85, 45)};
+      animation: nyc-blink 0.68s linear infinite; }}
+  @keyframes nyc-blink {{
+      0%, 42% {{ opacity: 1; }}
+      48%, 100% {{ opacity: 0; }} }}
+  @media (prefers-reduced-motion: reduce) {{
+      #measures .sign:not(.on):hover::before,
+      #measures .sign:not(.on):hover::after {{
+          animation: none; opacity: 0.55; }} }}
+  /* À l'arrière, le feu de recul : blanc, fixe, et court comme tout feu
+     arrière. Un clignotant annonce qu'on tourne ; un feu de recul dit
+     seulement qu'on regarde derrière. */
+  .sign:not(.on):hover::before {{
+      content: ""; position: absolute;
+      left: 0; right: 0; top: 50%; height: 18px; margin-top: -9px;
+      pointer-events: none;
+      background-image: {pool(reverse, 26, 10, 14, 30)}; }}
+  #scopes .sign:not(.on):hover::before {{
+      background-image: {pool(reverse, 26, 10, 14, 30, 'right')}; }}
+  #scopes .sign:not(.on):hover::after {{ left: 0; right: auto; }}
+  .sign:not(.on):hover::after {{
+      content: ""; position: absolute; top: 50%; right: 0;
+      width: 4px; height: 14px; margin-top: -7px;
+      border-radius: 2px; background: {reverse}; pointer-events: none;
+      box-shadow: {lamp(reverse, 50, 20)}; }}
+  @media (prefers-reduced-motion: reduce) {{
+      #measures .sign.on::before {{ animation: none; }} }}
+"""
 
     return (
         rf"""
@@ -550,55 +769,24 @@ def _controls_body() -> str:
   #wrap {{ position: absolute; inset: 0; display: flex; align-items: center;
           justify-content: space-between; padding: 0 2px; }}
   #clock {{ display: flex; align-items: center; gap: 10px; }}
-  /* Au repos un bouton n'est que son mot. Pas de cadre, pas de fond : ce qui
-     distingue l'actif doit être la seule chose à voir. */
-  .sign {{ position: relative; border: 0; background: none; cursor: pointer;
-          font: inherit; font-size: 0.8rem; font-weight: 500;
-          padding: 6px 13px; border-radius: 3px; overflow: hidden;
-          color: {p['TEXT_DIM']};
-          transition: color 0.18s ease; }}
-  .sign:hover {{ color: {p['TEXT_LIGHT']};
-                text-transform: uppercase; letter-spacing: 0.07em;
-                font-size: 0.75rem; font-weight: 600; }}
-  .sign.on {{ color: {on_ink}; font-weight: 600;
-             text-transform: uppercase; letter-spacing: 0.07em;
-             font-size: 0.75rem;
+  .set {{ position: relative; display: flex; align-items: center; gap: 6px; }}
+  .sign {{ position: relative; z-index: 1; border: 1px solid transparent;
+          background: none; cursor: pointer; font: inherit;
+          font-size: 0.72rem; font-weight: {'600' if dark else '700'};
+          text-transform: uppercase; letter-spacing: 0.07em;
+          padding: 6px 12px; border-radius: 2px;
+          color: {off_ink};
+          transition: color 0.18s ease;
+          {off_face} }}
+  .sign.on {{ color: {on_ink};
+             {"font-weight: 700; letter-spacing: 0.11em;" if dark else ""}
              {on_face} }}
-  .sign.on:hover {{ color: {on_ink};
-                   {f"background-image: {beam(44, 20, 6)};" if dark else ""} }}
-  /* Le cerclage est une pièce et non un trait : une épaisseur, des bouts
-     arrondis, un retrait sur les côtés qui le détache du bord du bouton. */
-  .sign.on::after {{
-      content: {'""' if dark else "none"};
-      position: absolute; left: 3px; right: 3px; bottom: 0; height: 3px;
-      border-radius: 2px; background: {m['metal']};
-      box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08); }}
-  /* Clignotant : survoler une destination où l'on ne va pas encore. Deux
-     couches, la flaque de lumière et l'ampoule, qui battent ensemble à
-     1,5 Hz — la cadence d'un vrai feu. */
-  .sign:not(.on):hover::before {{
-      content: {'""' if dark else "none"};
-      position: absolute; left: 0; right: 0; bottom: 0; height: 16px;
-      pointer-events: none;
-      background-image: linear-gradient(to top,
-          color-mix(in srgb, {accent} 38%, transparent) 0%,
-          color-mix(in srgb, {accent} 15%, transparent) 46%,
-          transparent 100%);
-      animation: blink 0.68s linear infinite; }}
-  .sign:not(.on):hover::after {{
-      content: {'""' if dark else "none"};
-      position: absolute; bottom: 0; left: 50%;
-      width: 18px; height: 4px; margin-left: -9px;
-      border-radius: 2px; background: {accent};
-      box-shadow: 0 0 5px 0 color-mix(in srgb, {accent} 85%, transparent),
-                  0 0 16px 3px color-mix(in srgb, {accent} 45%, transparent);
-      animation: blink 0.68s linear infinite; }}
-  @keyframes blink {{
-      0%, 42% {{ opacity: 1; }}
-      48%, 100% {{ opacity: 0; }} }}
-  @media (prefers-reduced-motion: reduce) {{
-      .sign:not(.on):hover::before, .sign:not(.on):hover::after {{
-          animation: none; opacity: 0.55; }} }}
+  {lamp_ink}
+  .sign.on:hover {{ color: {on_ink}; }}
+  .sign:not(.on):hover {{ color: {p['TEXT_LIGHT'] if dark else '#15151a'}; }}
+  {gantry}
+  {arrow}
+  {night}
   #play {{ font: inherit; font-size: 0.72rem; cursor: pointer; width: 30px;
           padding: 5px 0; border-radius: 3px; flex: 0 0 30px; }}
   #now {{ font-size: 1.15rem; font-weight: 600;
@@ -606,17 +794,16 @@ def _controls_body() -> str:
          text-align: right; }}
 </style>
 <div id="wrap">
-  <div id="measures" style="display:flex; gap:4px;"></div>
+  <div id="measures" class="set"></div>
   <div id="clock">
     <div id="now"></div>
     <button id="play"></button>
   </div>
-  <div id="scopes" style="display:flex; gap:4px;"></div>
+  <div id="scopes" class="set"></div>
 </div>
 """
         + _CONTROLS_JS
     )
-
 
 _CONTROLS_JS = r"""
 <script>
@@ -649,7 +836,9 @@ function paintButtons() {
      lire ici évite de chercher quelle barre porte l'accent. */
   document.getElementById("now").textContent =
     META.cycles[S.scope].labels[S.step];
-  document.getElementById("now").style.color = C.accent;
+  /* Le pas affiché est un repère, pas une mesure : il prend l'encre.
+     En jaune il concurrençait les taxis, qui portent la donnée. */
+  document.getElementById("now").style.color = C.ink;
   document.getElementById("play").textContent = S.playing ? "❚❚" : "▶";
 }
 
@@ -684,9 +873,18 @@ function boot() {
   publish();
 }
 
-/* Le maître de l'horloge répond aux arrivants. */
+/* Le maître de l'horloge répond aux arrivants, et aux demandes de saut. */
 channel.addEventListener("message", e => {
-  if (e.data && e.data.type === "hello" && META) { publish(); }
+  if (!e.data || !META) { return; }
+  if (e.data.type === "hello") { publish(); }
+  if (e.data.type === "seek") {
+    const n = stepsOf(S.scope);
+    S.step = ((e.data.step % n) + n) % n;
+    /* L'horloge repart du pas demandé sans s'arrêter : un saut est un
+       déplacement, pas une pause. Le bouton ❚❚ reste là pour s'arrêter. */
+    S.at = Date.now();
+    publish();
+  }
 });
 </script>
 """
@@ -704,19 +902,53 @@ _KPIS = r"""
   .k-lab { font-size: 0.64rem; letter-spacing: 0.09em;
            text-transform: uppercase; }
   .k-val { font-size: 1.15rem; font-weight: 600; line-height: 1.25;
-           font-variant-numeric: tabular-nums; white-space: nowrap;
-           overflow: hidden; text-overflow: ellipsis; }
-  .k-sub { font-size: 0.68rem; line-height: 1.3; white-space: nowrap;
-           overflow: hidden; text-overflow: ellipsis; }
+           font-variant-numeric: tabular-nums; }
+  .k-sub { font-size: 0.68rem; line-height: 1.3; }
+  /* Chaque valeur est une case où deux textes se superposent, le sortant et
+     l'entrant : ils occupent la même ligne et se croisent sur place. Un seul
+     élément qu'on vide puis remplit laisserait une case vide entre les deux,
+     et c'est ce trou qui se voit, pas le changement. */
+  .k-val, .k-sub { display: grid; min-width: 0; }
+  .k-val > span, .k-sub > span {
+      grid-area: 1 / 1; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      transition: opacity 0.22s ease, transform 0.22s ease; }
+  /* Le sortant monte, l'entrant vient d'en dessous : le même sens que le
+     ruban, où le passé file et l'à-venir arrive. */
+  .k-val > span.out, .k-sub > span.out {
+      opacity: 0; transform: translateY(-0.3em); }
+  .k-val > span.in, .k-sub > span.in {
+      opacity: 0; transform: translateY(0.3em); }
+  @media (prefers-reduced-motion: reduce) {
+      .k-val > span, .k-sub > span { transition: opacity 0.22s ease; }
+      .k-val > span.out, .k-sub > span.out,
+      .k-val > span.in, .k-sub > span.in { transform: none; } }
 </style>
 <div id="grid"></div>
 <script>
-/* Ces nombres ne sont pas interpolés entre deux pas, à la différence de la
-   carte et du ruban. Un chiffre qui défile en continu ne se lit pas : il
-   devient une texture. Il change donc d'un coup, au pas, et reste stable
-   entre deux. */
-const CELLS = ["trips", "revenue", "distance", "top"];
-const CELL_LABEL = { trips: "Courses", revenue: "Encaissé",
+/* Un nombre va à l'autre en comptant, il ne se fond pas. Deux pas voisins
+   sont voisins en valeur — 4 454 courses puis 5 065, jamais 2 000 puis
+   20 000 — et un compteur rend cette proximité lisible : on voit la pente,
+   pas seulement l'arrivée. C'est la même interpolation que la carte et le
+   ruban, qui montent et glissent entre deux pas ; les nombres s'y mettent.
+
+   Ce qui reste interdit, c'est le défilement continu : un chiffre qui bouge
+   sans arrêt devient une texture. Le compteur court 420 ms puis se tait, et
+   le pas en dure au moins 1 700 — la valeur passe donc les trois quarts du
+   temps immobile, assez pour être lue.
+
+   Les quatre cases partent en file, 70 ms d'écart. Quatre nombres qui
+   changent exactement ensemble font un seul sursaut ; décalés, ils font une
+   phrase, et l'œil les prend l'un après l'autre.
+
+   Le nom de zone, lui, n'est pas un nombre : il ne compte pas, il se croise
+   sur place. */
+/* Le nombre de courses n'est pas ici : le ruban le montre déjà, barre par
+   barre, et le répéter en gros à côté ne dit rien de plus. À sa place, le
+   prix d'une course — qui ne se lit nulle part ailleurs et qui bouge dans
+   l'autre sens : 24,33 $ au creux de la nuit, 34,76 $ à la pointe. */
+const CELLS = ["perride", "revenue", "distance", "top"];
+const CELL_LABEL = { perride: "$ par course", revenue: "Encaissé",
                      distance: "Distance moyenne", top: "Zone la plus active" };
 
 function boot() {
@@ -760,7 +992,15 @@ function cityDistance(step) {
 }
 
 function cityValue(step, measure) {
-  return measure === "distance" ? cityDistance(step) : cityAt(step, measure);
+  if (measure === "distance") { return cityDistance(step); }
+  /* Le prix d'une course se calcule sur les totaux de la ville, pas sur une
+     moyenne de moyennes : une zone à trois courses pèserait autant que
+     Midtown. */
+  if (measure === "perride") {
+    const t = cityAt(step, "trips");
+    return t ? cityAt(step, "revenue") / t : 0;
+  }
+  return cityAt(step, measure);
 }
 
 /* Moyenne de la mesure sur le cycle entier : c'est elle qui donne son sens au
@@ -791,28 +1031,92 @@ function topZone(step, measure) {
            value: best * META.cycles[S.scope].scales[measure] };
 }
 
+const ROLL_MS = 420, STAGGER = 70;
+const SOFT = window.matchMedia
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* Dernière valeur atteinte par case, et animation en cours : sans la
+   première, le compteur repartirait de l'arrivée précédente affichée, qui
+   peut être un état intermédiaire si le pas change pendant la course. */
+const LAST = {}, ANIM = {};
+
+/* Compte de l'ancienne valeur à la nouvelle. `render` fait le texte, ce qui
+   garde ici la même mise en forme qu'ailleurs — francs, miles, pourcentage —
+   sans que cette fonction ait à savoir laquelle. */
+function rollCell(el, key, to, render, delay) {
+  let span = el.firstElementChild;
+  if (!span) { span = document.createElement("span"); el.appendChild(span); }
+  const from = LAST[key] === undefined ? to : LAST[key];
+  LAST[key] = to;
+  if (ANIM[key]) { cancelAnimationFrame(ANIM[key]); ANIM[key] = 0; }
+  if (from === to || SOFT) { span.textContent = render(to); return; }
+  span.textContent = render(from);
+  const t0 = performance.now() + delay;
+  const tick = now => {
+    /* Avant t0 la fraction est nulle : c'est ainsi que se fait l'attente de
+       la case, sans minuteur à annuler si le pas change entre-temps. */
+    const u = Math.max(0, Math.min(1, (now - t0) / ROLL_MS));
+    const e = 1 - Math.pow(1 - u, 3);
+    span.textContent = render(from + (to - from) * e);
+    ANIM[key] = u < 1 ? requestAnimationFrame(tick) : 0;
+  };
+  ANIM[key] = requestAnimationFrame(tick);
+}
+
+/* Remplace le texte d'une case en croisant l'ancien et le nouveau. Rien ne
+   bouge si le texte est le même : la distance moyenne et la zone la plus
+   active tiennent souvent plusieurs pas, et les faire clignoter sans qu'elles
+   changent dirait un changement qui n'a pas eu lieu. */
+function setCell(el, text) {
+  const cur = el.lastElementChild;
+  if (cur && cur.textContent === text) { return; }
+  const next = document.createElement("span");
+  next.textContent = text;
+  next.className = "in";
+  el.appendChild(next);
+  /* Deux images : la première pose l'état d'entrée, la seconde le relâche.
+     Poser et retirer la classe dans la même image ne déclencherait aucune
+     transition — le navigateur n'aurait jamais rendu l'état de départ. */
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    next.classList.remove("in");
+    if (cur) {
+      cur.classList.add("out");
+      cur.addEventListener("transitionend", () => cur.remove(), { once: true });
+      /* Filet : une transition sur un onglet caché ne se termine jamais, et
+         les sortants s'empileraient derrière l'entrant. */
+      setTimeout(() => cur.remove(), 600);
+    }
+  }));
+}
+
 function signed(ratio) {
   const pct = Math.round((ratio - 1) * 100);
   return (pct > 0 ? "+" : "") + pct + " %";
 }
 
 function onState() {
-  for (const key of ["trips", "revenue", "distance"]) {
+  let rank = 0;
+  for (const key of ["perride", "revenue", "distance"]) {
     const v = cityValue(S.step, key);
     const avg = cycleAverage(key);
     const cell = document.getElementById("c-" + key);
-    cell.querySelector(".k-val").textContent = fmt(v, key);
+    const delay = rank++ * STAGGER;
     cell.querySelector(".k-val").style.color =
-      key === S.measure ? C.accent : C.ink;
-    cell.querySelector(".k-sub").textContent =
-      avg ? signed(v / avg) + " vs moyenne" : "";
+      key === S.measure ? C.brick : C.ink;
+    rollCell(cell.querySelector(".k-val"), key, v,
+             key === "perride"
+               ? x => "$" + x.toFixed(2).replace(".", ",")
+               : x => fmt(x, key),
+             delay);
+    rollCell(cell.querySelector(".k-sub"), key + "/sub", v,
+             x => (avg ? signed(x / avg) + " vs moyenne" : ""), delay);
   }
   const t = topZone(S.step, S.measure);
   const cell = document.getElementById("c-top");
-  cell.querySelector(".k-val").textContent = t.zone.name;
   cell.querySelector(".k-val").style.color = C.ink;
-  cell.querySelector(".k-sub").textContent =
-    t.zone.borough + " · " + fmt(t.value, S.measure);
+  setCell(cell.querySelector(".k-val"), t.zone.name);
+  rollCell(cell.querySelector(".k-sub"), "top/sub", t.value,
+           x => t.zone.borough + " · " + fmt(x, S.measure), rank * STAGGER);
 }
 </script>
 """
@@ -826,22 +1130,30 @@ _MAP = r"""
 <script>
 let deckgl = null;
 
-/* La carte garde son fond de nuit dans les deux thèmes. Une ville extrudée
-   se lit par ses ombres, et une ombre n'existe pas sur fond blanc : en thème
-   clair, les colonnes basses se confondaient avec le sol et la silhouette de
-   New York disparaissait. Le bloc est assumé comme une fenêtre sur la ville,
-   pas comme une surface de page. */
-document.body.style.background = "#0b0b0f";
+/* La carte a deux villes, une par thème, et le sol de chacune est celui de
+   la page : le bloc n'est pas une fenêtre posée sur le tableau de bord, c'est
+   le tableau de bord qui se soulève. Le socle est donc laissé au `C.bg` du
+   socle commun, et ce qui change ici est la ville dessus.
+
+   Les deux rampes finissent sur l'ambre, qui dit partout la valeur haute. Ce
+   qui s'inverse est le bas : la nuit part du violet sourd et monte vers la
+   lumière, le jour part de la pierre et descend vers l'ambre brûlé. Dans les
+   deux cas la zone la plus active est la plus contrastée du sol — et le bas
+   de la rampe reste à l'écart de ce sol, sans quoi les zones éteintes de
+   trois heures du matin s'effaceraient au lieu de se montrer basses. */
+const NIGHT = CFG.mode === "dark";
 
 /* Hauteur de la plus haute colonne, en mètres. Chaque mesure est ramenée à
    son propre maximum : sans quoi la distance moyenne resterait au sol. */
 const TOP_M = 9000;
 
-/* Le bas de la rampe reste nettement au-dessus du fond : à trois heures du
-   matin toutes les zones sont au plus bas, et une couleur basse trop proche
-   du noir effacerait la ville au lieu de la montrer éteinte. */
-const RAMP = { a: [58, 54, 67], b: [226, 172, 70] };
-const EDGE = [255, 255, 255, 30];
+const RAMP = NIGHT ? { a: [58, 54, 67], b: [226, 172, 70] }
+                   : { a: [168, 164, 178], b: [169, 116, 26] };
+
+/* L'arête sépare deux faces de même teinte. De nuit elle est une lumière, de
+   jour un trait d'ombre : la même arête en blanc disparaîtrait sur la pierre
+   pâle. */
+const EDGE = NIGHT ? [255, 255, 255, 30] : [28, 26, 32, 46];
 
 /* Une lumière rasante donne le relief : c'est l'éclairage qui fait lire une
    hauteur, une couleur seule se lit comme une tache. L'effet est construit
@@ -850,9 +1162,14 @@ function lighting() {
   if (!deck.LightingEffect || !deck.DirectionalLight || !deck.AmbientLight) {
     return [];
   }
+  /* De nuit, une rasante marquée : c'est elle qui sculpte la ville dans le
+     noir. De jour, le ciel ouvert — l'ambiante porte, la rasante ne fait plus
+     que poser les flancs, sinon les faces éclairées brûlent sur le sol pâle. */
   return [new deck.LightingEffect({
-    amb: new deck.AmbientLight({ color: [255, 248, 232], intensity: 1.05 }),
-    key: new deck.DirectionalLight({ color: [255, 240, 214], intensity: 1.9,
+    amb: new deck.AmbientLight({ color: NIGHT ? [255, 248, 232] : [255, 253, 248],
+                                 intensity: NIGHT ? 1.05 : 1.02 }),
+    key: new deck.DirectionalLight({ color: NIGHT ? [255, 240, 214] : [255, 250, 238],
+                                     intensity: NIGHT ? 1.9 : 0.95,
                                      direction: [-1.2, -2.6, -1.8] }),
   })];
 }
@@ -953,11 +1270,415 @@ function frame() {
       },
       getLineColor: EDGE,
       lineWidthMinPixels: 0.5,
-      material: { ambient: 0.38, diffuse: 0.78, shininess: 28,
-                  specularColor: [72, 66, 54] },
+      material: NIGHT ? { ambient: 0.38, diffuse: 0.78, shininess: 28,
+                          specularColor: [72, 66, 54] }
+                      : { ambient: 0.62, diffuse: 0.52, shininess: 14,
+                          specularColor: [206, 202, 194] },
       updateTriggers: { getElevation: [S.scope, S.measure, S.step, t],
                         getFillColor: [S.scope, S.measure, S.step, t] },
     })] });
+  }
+  requestAnimationFrame(frame);
+}
+</script>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Composant 2 bis — la ville en maquette, un taxi par course
+# ---------------------------------------------------------------------------
+_CITY = r"""
+<script src="https://unpkg.com/deck.gl@8.9.36/dist.min.js"></script>
+<div id="city" style="position:absolute; inset:0;"></div>
+<script>
+/* Deux cent soixante et un gratte-ciel posent le sol, et au-dessus un taxi
+   vaut une course. Le taxi part d'un endroit tiré au hasard dans sa zone de
+   départ, rejoint un axe, traverse, puis se disperse vers un endroit tiré au
+   hasard dans sa zone d'arrivée.
+
+   L'axe n'est pas un décor : sans lui, mille directions partaient en même
+   temps depuis mille points différents et la ville devenait une ruche. Les
+   courses qui restent dans leur zone ne voyagent pas — un trait aurait
+   inventé un trajet qu'on ne connaît pas. Elles se posent et font la
+   densité.
+
+   Les tours prennent la couleur du sol de leur secteur : le relief ne vient
+   que de la lumière. Toute couleur chaude sur la carte entrerait en
+   concurrence avec le jaune des taxis, qui est la seule donnée en mouvement.
+*/
+const NIGHT = CFG.mode === "dark";
+
+/* À l'échelle, une tour de 400 m sur une vue qui porte 25 km fait un pixel.
+   On garde les emprises et les hauteurs réelles mais on les grossit, comme
+   une maquette. */
+const EXAG = 3.2, FOOT = 2.4;
+const ALT = 950;              /* altitude de vol, au ras des toits          */
+const REST = 70;              /* altitude des taxis posés, entre les tours  */
+const SPEED = 0.055;          /* degrés par seconde : vitesse constante     */
+const TAXI_PX = 6.2;
+
+const PER_AXIS = 260;         /* courses par axe avant d'en ouvrir un autre */
+const MAX_AXIS = 5;
+const AXIS_GAP = 0.0062;
+const JITTER = 0.0011;
+const IN = 0.20, OUT = 0.80;  /* part du trajet passée à rejoindre l'axe    */
+const KLAT = Math.cos(40.75 * Math.PI / 180);
+
+const SECTORS = [0, 1, 2, 3, 4, 5, 6];
+const TINT = [[120,114,140],[138,128,154],[112,110,138],[100,102,130],
+              [104,116,140],[126,114,136],[110,108,138],[104,118,128],
+              [116,116,134]];
+
+function rgb(hex) {
+  const h = String(hex).replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16),
+          parseInt(h.slice(4, 6), 16)];
+}
+/* Le sol de la carte est le fond de la page : le bloc n'est pas une fenêtre
+   posée sur le tableau de bord, c'est le tableau de bord qui se soulève. */
+const SCENE_BG = rgb(C.bg);
+const GROUND_A = 30 / 255;
+const LIFT = NIGHT ? [152, 148, 174] : [198, 195, 210];
+const LIFT_K = NIGHT ? [0.52, 0.34] : [0.26, 0.30];
+
+/* Le taxi est dessiné dans un canvas, pas chargé : une image venue d'ailleurs
+   aurait demandé un hôte, et un rond ne ressemble pas à une voiture. */
+function taxiAtlas() {
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = "#2a241c";
+  g.fillRect(14, 15, 11, 6); g.fillRect(14, 43, 11, 6);
+  g.fillRect(39, 15, 11, 6); g.fillRect(39, 43, 11, 6);
+  g.fillStyle = "#edad12";
+  g.beginPath();
+  if (g.roundRect) { g.roundRect(8, 19, 48, 26, 8); }
+  else { g.rect(8, 19, 48, 26); }
+  g.fill();
+  g.fillStyle = "#30281e";
+  g.fillRect(41, 23, 10, 18);
+  g.fillStyle = "#8a6f3a";
+  g.fillRect(20, 25, 16, 14);
+  g.fillStyle = "#fff3cf";
+  g.fillRect(27, 29, 7, 6);
+  return c;
+}
+const ATLAS = taxiAtlas();
+const MAPPING = { taxi: { x: 0, y: 0, width: 64, height: 64,
+                          anchorX: 32, anchorY: 32, mask: false } };
+
+let CITY = null, POOL = null, GROUND = null, SPACED = null;
+let MOV = null, SIT = null, AXES = [], STATIC = [];
+let deckgl = null, VIEWSTATE = null, LABEL_POS = null, started = 0;
+
+function pick(s) { return POOL[s][(Math.random() * POOL[s].length) | 0]; }
+
+/* Les 24 pas de l'heure sont la seule granularité de ce payload. Sur les
+   autres cycles on montre la journée moyenne plutôt que de laisser le bloc
+   figé sur un pas qui ne veut rien dire. */
+function matrix() {
+  if (S.scope === "hour") { return CITY.trips[S.step % 24]; }
+  const n = CITY.order.length;
+  const out = [];
+  for (let a = 0; a < n; a++) {
+    const row = [];
+    for (let b = 0; b < n; b++) {
+      let v = 0;
+      for (let h = 0; h < 24; h++) { v += CITY.trips[h][a][b]; }
+      row.push(v / 24);
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function axesFor(a, b, n) {
+  const A = CITY.lonlat[a], B = CITY.lonlat[b];
+  const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len / KLAT, py = dx / len;
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const off = (k - (n - 1) / 2) * AXIS_GAP;
+    out.push([[A[0] + (B[0] - A[0]) * 0.17 + px * off,
+               A[1] + (B[1] - A[1]) * 0.17 + py * off],
+              [A[0] + (B[0] - A[0]) * 0.83 + px * off,
+               A[1] + (B[1] - A[1]) * 0.83 + py * off],
+              [px, py]]);
+  }
+  return out;
+}
+
+function build() {
+  const m = matrix();
+  const o = [], e1 = [], e2 = [], d = [], inv = [], ph = [];
+  const rp = [];
+  AXES = [];
+  for (const a of SECTORS) {
+    for (const b of SECTORS) {
+      const n = Math.round(m[a][b]);
+      if (n <= 0) { continue; }
+      if (a === b) {
+        for (let k = 0; k < n; k++) {
+          const p = pick(a);
+          rp.push(p[0], p[1], REST);
+        }
+        continue;
+      }
+      const na = Math.max(1, Math.min(MAX_AXIS, Math.round(n / PER_AXIS)));
+      const ax = axesFor(a, b, na);
+      for (const q of ax) {
+        AXES.push({ s: [q[0][0], q[0][1], ALT], t: [q[1][0], q[1][1], ALT] });
+      }
+      for (let k = 0; k < n; k++) {
+        const q = ax[(Math.random() * na) | 0];
+        const j = (Math.random() - 0.5) * 2 * JITTER;
+        const P = pick(a), Q = pick(b);
+        const x1 = q[0][0] + q[2][0] * j, y1 = q[0][1] + q[2][1] * j;
+        const x2 = q[1][0] + q[2][0] * j, y2 = q[1][1] + q[2][1] * j;
+        const L = Math.hypot((x1 - P[0]) * KLAT, y1 - P[1])
+                + Math.hypot((x2 - x1) * KLAT, y2 - y1)
+                + Math.hypot((Q[0] - x2) * KLAT, Q[1] - y2) || 0.01;
+        o.push(P[0], P[1]); e1.push(x1, y1); e2.push(x2, y2);
+        d.push(Q[0], Q[1]);
+        inv.push(SPEED / L); ph.push(Math.random());
+      }
+    }
+  }
+  LABEL_POS = labelSpots();
+  const nm = inv.length, nr = rp.length / 3;
+  MOV = { n: nm, pos: new Float32Array(nm * 3), ang: new Float32Array(nm),
+          o: new Float32Array(o), e1: new Float32Array(e1),
+          e2: new Float32Array(e2), d: new Float32Array(d),
+          inv: new Float32Array(inv), ph: new Float32Array(ph) };
+  const ra = new Float32Array(nr);
+  for (let i = 0; i < nr; i++) { ra[i] = Math.random() * 360; }
+  SIT = { n: nr, pos: new Float32Array(rp), ang: ra };
+  STATIC = staticLayers();
+}
+
+/* Trois segments : décollage vers l'axe, traversée à altitude constante,
+   dispersion vers le point d'arrivée. L'altitude suit, sinon les taxis
+   coupaient à travers les tours au départ et à l'arrivée. */
+function advance(t) {
+  const P = MOV.pos, O = MOV.o, A = MOV.e1, B = MOV.e2, D = MOV.d;
+  const I = MOV.inv, H = MOV.ph, G = MOV.ang, DEG = 180 / Math.PI;
+  for (let i = 0; i < MOV.n; i++) {
+    let u = H[i] + t * I[i];
+    u -= Math.floor(u);
+    const j = 2 * i, k = 3 * i;
+    if (u < IN) {
+      const v = u / IN;
+      P[k] = O[j] + (A[j] - O[j]) * v;
+      P[k + 1] = O[j + 1] + (A[j + 1] - O[j + 1]) * v;
+      P[k + 2] = REST + (ALT - REST) * v;
+      G[i] = Math.atan2(A[j + 1] - O[j + 1], (A[j] - O[j]) * KLAT) * DEG;
+    } else if (u < OUT) {
+      const v = (u - IN) / (OUT - IN);
+      P[k] = A[j] + (B[j] - A[j]) * v;
+      P[k + 1] = A[j + 1] + (B[j + 1] - A[j + 1]) * v;
+      P[k + 2] = ALT;
+      G[i] = Math.atan2(B[j + 1] - A[j + 1], (B[j] - A[j]) * KLAT) * DEG;
+    } else {
+      const v = (u - OUT) / (1 - OUT);
+      P[k] = B[j] + (D[j] - B[j]) * v;
+      P[k + 1] = B[j + 1] + (D[j + 1] - B[j + 1]) * v;
+      P[k + 2] = ALT + (REST - ALT) * v;
+      G[i] = Math.atan2(D[j + 1] - B[j + 1], (D[j] - B[j]) * KLAT) * DEG;
+    }
+  }
+}
+
+/* Les étiquettes sont ramenées dans le cadre en pixels, pas en degrés : la
+   vue est tournée de 29 degrés, si bien qu'une borne en longitude ne
+   correspond à aucun bord de l'écran et le nom de Brooklyn sortait quand
+   même. On projette, on borne, on reprojette. */
+function labelSpots() {
+  const el = document.getElementById("city");
+  const W = el.clientWidth || 600, H = el.clientHeight || 400;
+  if (!VIEWSTATE || !deck.WebMercatorViewport) {
+    return SECTORS.map(a => CITY.lonlat[a]);
+  }
+  const vp = new deck.WebMercatorViewport(
+    Object.assign({ width: W, height: H }, VIEWSTATE));
+  const padX = Math.min(64, W * 0.14), padY = Math.min(28, H * 0.07);
+  /* Le nom est posé en altitude : sa place à l'écran n'est pas celle du sol
+     sous lui. On borne la position affichée, puis on retire ce décalage pour
+     retrouver le point de sol à donner à la couche. */
+  const z = ALT + 340;
+  return SECTORS.map(a => {
+    const g = CITY.lonlat[a];
+    const p0 = vp.project([g[0], g[1], 0]);
+    const p1 = vp.project([g[0], g[1], z]);
+    const x = Math.min(W - padX, Math.max(padX, p1[0]));
+    const y = Math.min(H - padY, Math.max(padY, p1[1]));
+    return vp.unproject([x - (p1[0] - p0[0]), y - (p1[1] - p0[1])]);
+  });
+}
+
+function staticLayers() {
+  const out = [];
+  out.push(new deck.PolygonLayer({
+    id: "ground", data: CITY.polys, extruded: false, filled: true,
+    stroked: false, pickable: false,
+    getPolygon: d => d.p,
+    getFillColor: d => [TINT[d.s][0], TINT[d.s][1], TINT[d.s][2], 30],
+  }));
+  out.push(new deck.PolygonLayer({
+    id: "buildings", data: CITY.bld, extruded: true, filled: true,
+    pickable: false,
+    getPolygon: d => d.p,
+    getElevation: d => d.h * EXAG,
+    getFillColor: d => {
+      const g = GROUND[d.s], t = Math.min(1, (d.h - 61) / 240);
+      const k = LIFT_K[0] + LIFT_K[1] * t;
+      return [g[0] + (LIFT[0] - g[0]) * k, g[1] + (LIFT[1] - g[1]) * k,
+              g[2] + (LIFT[2] - g[2]) * k, 248];
+    },
+    /* L'ambiante et la rasante additionnées dépassaient 1 : les toits
+       saturaient en blanc quelle que soit leur couleur de base. */
+    material: { ambient: 0.70, diffuse: 0.62, shininess: 10,
+                specularColor: [30, 28, 38] },
+  }));
+  out.push(new deck.LineLayer({
+    id: "axes", data: AXES,
+    getSourcePosition: d => d.s, getTargetPosition: d => d.t,
+    getColor: NIGHT ? [160, 156, 182, 20] : [118, 114, 140, 20], getWidth: 1,
+  }));
+  /* Sans depthTest coupé, les tours mangeaient la première lettre : le texte
+     passait derrière une façade plus haute que son altitude. */
+  out.push(new deck.TextLayer({
+    id: "zone-text", data: SECTORS,
+    getPosition: a => {
+      const p = LABEL_POS[a] || CITY.lonlat[a];
+      return [p[0], p[1], ALT + 340];
+    },
+    getText: a => SPACED[a], getSize: 10.5, sizeUnits: "pixels",
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
+    fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
+    outlineWidth: 3.4,
+    outlineColor: NIGHT ? [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 215]
+                        : [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 222],
+    getColor: NIGHT ? [214, 210, 230, 235] : [72, 68, 94, 230],
+    parameters: { depthTest: false },
+  }));
+  return out;
+}
+
+function layers() {
+  const out = STATIC.slice();
+  /* billboard: false pose la voiture à plat sur le plan du sol : elle tourne
+     avec la carte au lieu de rester face à l'écran, et son cap se lit. */
+  out.push(new deck.IconLayer({
+    id: "sit", iconAtlas: ATLAS, iconMapping: MAPPING,
+    data: { length: SIT.n,
+            attributes: { getPosition: { value: SIT.pos, size: 3 },
+                          getAngle: { value: SIT.ang, size: 1 } } },
+    getIcon: () => "taxi", sizeUnits: "pixels", getSize: TAXI_PX * 0.78,
+    billboard: false, opacity: 0.62,
+  }));
+  out.push(new deck.IconLayer({
+    id: "mov", iconAtlas: ATLAS, iconMapping: MAPPING,
+    data: { length: MOV.n,
+            attributes: { getPosition: { value: MOV.pos, size: 3 },
+                          getAngle: { value: MOV.ang, size: 1 } } },
+    getIcon: () => "taxi", sizeUnits: "pixels", getSize: TAXI_PX,
+    billboard: false,
+  }));
+  return out;
+}
+
+/* Le cadrage est calculé et non demandé à fitBounds : celui-ci raisonne en
+   vue de dessus, et sous 54 degrés d'inclinaison la ville sortait trois fois
+   trop petite. On cadre sur les centres de secteurs, pas sur les polygones :
+   la pointe du Queens tirait l'emprise si loin que Manhattan tombait à
+   quelques pixels. */
+function fitted() {
+  const el = document.getElementById("city");
+  const W = el.clientWidth || 600;
+  let w = 180, s = 90, e = -180, n = -90;
+  for (const a of SECTORS) {
+    const c = CITY.lonlat[a];
+    if (c[0] < w) { w = c[0]; }
+    if (c[0] > e) { e = c[0]; }
+    if (c[1] < s) { s = c[1]; }
+    if (c[1] > n) { n = c[1]; }
+  }
+  const mx = (e - w) * 0.17, my = (n - s) * 0.17;
+  w -= mx; e += mx; s -= my; n += my;
+  VIEWSTATE = { longitude: (w + e) / 2 - 0.022, latitude: (s + n) / 2 - 0.008,
+                zoom: Math.log2(0.98 * W * 360 / (512 * (e - w))),
+                pitch: 54, bearing: -29 };
+  return VIEWSTATE;
+}
+
+/* Les emprises sont dilatées autour de leur centre : la hauteur grossit, pas
+   la largeur, et les tours sortaient comme des aiguilles. */
+function fatten() {
+  for (const d of CITY.bld) {
+    let cx = 0, cy = 0;
+    for (const p of d.p) { cx += p[0]; cy += p[1]; }
+    cx /= d.p.length; cy /= d.p.length;
+    d.p = d.p.map(p => [cx + (p[0] - cx) * FOOT, cy + (p[1] - cy) * FOOT]);
+  }
+}
+
+const SHORT = ["Downtown", "Midtown", "Uptown", "Harlem", "Queens",
+               "Brooklyn", "Bronx", "SI", "EWR"];
+
+async function boot() {
+  CITY = await (await fetch(staticBase() + "nyc_city.json")).json();
+  POOL = CITY.pools.pt.map(flat => {
+    const a = new Array(flat.length / 2);
+    for (let i = 0; i < a.length; i++) {
+      a[i] = [CITY.pools.b[0] + flat[2 * i] / CITY.pools.sc,
+              CITY.pools.b[1] + flat[2 * i + 1] / CITY.pools.sc];
+    }
+    return a;
+  });
+  GROUND = TINT.map(c => [
+    SCENE_BG[0] + (c[0] - SCENE_BG[0]) * GROUND_A,
+    SCENE_BG[1] + (c[1] - SCENE_BG[1]) * GROUND_A,
+    SCENE_BG[2] + (c[2] - SCENE_BG[2]) * GROUND_A]);
+  SPACED = SHORT.map(n => n.toUpperCase().split("").join(" "));
+  fatten();
+  deckgl = new deck.DeckGL({
+    container: "city",
+    initialViewState: fitted(),
+    /* La molette appartient à la page : un bloc posé dans une grille qui
+       défile ne doit pas happer le défilement. */
+    controller: { scrollZoom: false, dragPan: true, dragRotate: true,
+                  doubleClickZoom: true, touchZoom: true, keyboard: false },
+    effects: (deck.LightingEffect && deck.DirectionalLight
+              && deck.AmbientLight)
+      ? [new deck.LightingEffect({
+          amb: new deck.AmbientLight({ color: [246, 244, 252],
+                                       intensity: 0.95 }),
+          key: new deck.DirectionalLight({ color: [248, 246, 255],
+                 intensity: 0.55, direction: [-1.1, -2.2, -2.0] }) })]
+      : [],
+    layers: [],
+  });
+  const el = document.getElementById("city");
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (el.clientWidth && el.clientHeight) {
+        deckgl.setProps({ initialViewState: fitted() });
+        build();
+      }
+    }).observe(el);
+  }
+  build();
+  frame();
+}
+
+function onState() { if (CITY) { build(); } }
+
+function frame(now) {
+  if (deckgl && MOV) {
+    if (!started) { started = now || 0; }
+    advance(((now || 0) - started) / 1000);
+    deckgl.setProps({ layers: layers() });
   }
   requestAnimationFrame(frame);
 }
@@ -999,7 +1720,31 @@ function size() {
 }
 window.addEventListener("resize", size);
 
-function boot() { size(); frame(); }
+/* Quel pas se trouve sous une abscisse. C'est l'inverse exact du placement
+   de `draw` : x = (NOW_X * span + k - t) * pitch, donc k s'en déduit. Les
+   deux formules doivent rester d'accord — si l'une bouge, l'autre suit. */
+function stepAt(px) {
+  const { span } = window_();
+  const pitch = cv.clientWidth / span;
+  const n = stepsOf(S.scope);
+  const k = Math.round(px / pitch - NOW_X * span + phase());
+  return ((S.step + k) % n + n) % n;
+}
+
+function boot() {
+  size();
+  /* Le ruban devient une règle : on y désigne l'heure qu'on veut voir au lieu
+     de l'attendre. Le maître de l'horloge est seul à tenir le pas, on lui
+     demande donc d'y aller plutôt que de le poser soi-même — deux composants
+     qui écrivent le même pas le feraient diverger. */
+  cv.style.cursor = "pointer";
+  cv.addEventListener("click", e => {
+    if (!META) { return; }
+    channel.postMessage({
+      type: "seek", step: stepAt(e.clientX - cv.getBoundingClientRect().left) });
+  });
+  frame();
+}
 
 function totals(step) {
   /* Somme sur toutes les zones : le ruban parle de la ville entière, la
@@ -1059,7 +1804,7 @@ function draw() {
        il se perd des deux côtés. */
     const fade = Math.max(0, 1 - Math.abs(k - (here ? 0 : 0)) / (span * 0.62));
     ctx.globalAlpha = here ? 1 : 0.3 + fade * 0.58;
-    ctx.fillStyle = here ? C.accent : C.muted;
+    ctx.fillStyle = here ? C.brick : C.muted;
     ctx.fillRect(x - bw / 2, base - bh, bw, bh);
 
     ctx.globalAlpha = here ? 0.95 : 0.3 + fade * 0.4;
@@ -1068,7 +1813,7 @@ function draw() {
     ctx.fillText(META.cycles[S.scope].short[idx], x, base + 16);
     if (here) {
       ctx.font = "600 12px system-ui, sans-serif";
-      ctx.fillStyle = C.accent;
+      ctx.fillStyle = C.ink;
       ctx.fillText(fmt(vals[idx] * scale, S.measure), x, base - bh - 7);
     }
   }
