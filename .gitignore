@@ -227,3 +227,9 @@ ASSETS/.vscode/
 # Fichiers servis au navigateur par les composants du cockpit. Reconstruits
 # au premier affichage depuis data/ : du cache, pas des sources.
 static/
+
+# Écrit par le Finder dans chaque dossier qu'il ouvre.
+.DS_Store
+
+# Traces laissées par une session d'automatisation de navigateur.
+.playwright-mcp/
