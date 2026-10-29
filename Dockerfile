@@ -12,10 +12,14 @@ COPY streamlit_dashboard_local.py .
 # donc un ModuleNotFoundError au premier import, en production seulement.
 COPY nyc_cockpit.py nyc_content.py nyc_dashboard.py nyc_lang.py \
      nyc_live.py nyc_theme.py nyc_views.py nyc_zones.py ./
-# Géométrie de référence : les contours des 263 zones et la maquette de la
-# ville. Versionnées avec le dépôt (voir l'exception dans .gitignore) parce
-# qu'elles sont stables et que le cockpit en a besoin au démarrage.
-COPY data/reference/ data/reference/
+# data/ n'est pas copié, et ne peut pas l'être : .dockerignore l'exclut en
+# bloc — les Parquet de courses pèsent des gigaoctets — et le build échoue
+# donc sur un COPY qui le vise. Ce n'est pas une perte : docker-compose
+# monte ./data sur /app/data, ce qui masquerait de toute façon ce que
+# l'image y aurait mis. La géométrie de référence dont le cockpit a besoin
+# au démarrage — contours des 263 zones, maquette de la ville — est
+# versionnée avec le dépôt (exception dans .gitignore) et arrive donc par
+# le `git pull` du déploiement, à travers ce montage.
 # Les trois scripts que l'entrypoint peut avoir à lancer au premier
 # démarrage : le téléchargement, les agrégats journaliers, les cycles.
 COPY scripts/B_load_local_parquet.py scripts/G_build_aggregates.py \
