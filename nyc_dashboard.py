@@ -123,7 +123,7 @@ def _load(load_data):
 AGG_DIR = pathlib.Path(__file__).resolve().parent / "data" / "aggregates"
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def _cross(name):
     path = AGG_DIR / f"{name}.parquet"
     if not path.exists():

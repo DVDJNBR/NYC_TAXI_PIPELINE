@@ -3,6 +3,11 @@ services:
     build: .
     container_name: nyc-taxi-dashboard
     restart: unless-stopped
+    # Plafond mémoire : sans lui, une session qui retombait sur le scan des
+    # 75 M de lignes brutes (agrégats manquants, 2026-10-29) montait à 6 Go,
+    # toute la RAM du VPS, et faisait tomber les autres sites hébergés.
+    mem_limit: 2g
+    memswap_limit: 2g
     ports:
       # Bind sur localhost uniquement : c'est Caddy (déjà en place sur le VPS)
       # qui reverse-proxy vers ce port, le conteneur n'est jamais exposé directement.

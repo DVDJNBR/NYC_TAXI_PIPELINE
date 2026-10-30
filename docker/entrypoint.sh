@@ -41,6 +41,14 @@ fi
 mkdir -p /app/static
 cp -f /app/data/reference/nyc_city.json /app/static/nyc_city.json 2>/dev/null || true
 
+# Pré-calcul du cockpit avant d'accepter des visiteurs. Sans lui, le premier
+# visiteur après chaque démarrage attendait que meta() écrive static/
+# (une trentaine de secondes sur le VPS, page grise pendant ce temps). Le
+# tampon que meta() pose dans static/ évite ensuite à la session Streamlit de
+# refaire le calcul. Un échec ici ne doit pas empêcher le démarrage : la
+# session le refera, comme avant.
+python -c "import nyc_live; nyc_live.meta()" >/dev/null 2>&1 || true
+
 exec streamlit run streamlit_dashboard_local.py \
     --server.port=8501 \
     --server.address=0.0.0.0 \

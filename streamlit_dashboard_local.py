@@ -83,7 +83,7 @@ def get_connection():
     """)
     return conn
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def query(sql) -> pd.DataFrame:
     conn = get_connection()
     df = conn.execute(sql).fetchdf()
@@ -104,7 +104,7 @@ def _write_aggregates(tables):
     for name, df in zip(_AGG_NAMES, tables):
         df.to_parquet(_AGG_DIR / f"{name}.parquet")
 
-@st.cache_data(ttl=3600)
+@st.cache_data
 def load_data():
     # Agrégats déjà calculés sur disque (persistent entre redémarrages du
     # conteneur, contrairement à st.cache_data qui ne vit qu'en RAM) : on les

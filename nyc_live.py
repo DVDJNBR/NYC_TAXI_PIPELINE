@@ -150,7 +150,25 @@ def _build(version: int, geo_mtime: float, zone_mtime: float,
     Les dates de modification sont des arguments et non des lectures
     internes : elles font la clé du cache, qui s'invalide donc tout seul
     quand les agrégats sont reconstruits.
+
+    Le cache de Streamlit ne vit qu'en mémoire : chaque redémarrage du
+    conteneur refaisait ce calcul pour le premier visiteur. Un tampon posé à
+    côté des fichiers garde la même clé sur disque ; s'il correspond, les
+    fichiers déjà écrits sont repris tels quels.
     """
+    key = {"version": version, "mtimes": [geo_mtime, zone_mtime, od_mtime]}
+    stamp = STATIC / "nyc_live.stamp.json"
+    if stamp.exists() and (STATIC / "nyc_live.bin").exists() \
+            and (STATIC / "nyc_live.json").exists():
+        saved = json.loads(stamp.read_text())
+        if saved.get("key") == key:
+            return saved["summary"]
+    summary = _compute()
+    stamp.write_text(json.dumps({"key": key, "summary": summary}))
+    return summary
+
+
+def _compute() -> dict:
     geo = {z["id"]: z for z in json.loads(GEO.read_text())}
     zc = pd.read_parquet(ZONE_CYCLE)
     od = pd.read_parquet(OD_CYCLE)
