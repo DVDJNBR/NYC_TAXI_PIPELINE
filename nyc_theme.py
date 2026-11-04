@@ -804,7 +804,7 @@ def inject_css():
            viennent après les pseudo-éléments. */
         .st-key-band > * {{ order: 3; }}
         /* Streamlit donne au conteneur du composant une base de 26 px — la
-           hauteur passée à components.html. L'iframe, elle, fait 72 px de
+           hauteur passée à st.iframe. L'iframe, elle, fait 72 px de
            large et débordait sur le sélecteur de langue. Les deux conteneurs
            sont donc dimensionnés ici : largeur fixe pour l'iframe, contenu
            pour le reste. */
@@ -1247,7 +1247,6 @@ def band(nav=None):
     qu'il s'écarte de celui que le serveur a utilisé — le juge n'est pas
     `st.context.theme.type`, qui est justement ce qui peut être faux.
     """
-    import streamlit.components.v1 as components
 
     p = palette()
     css = f"""
@@ -1302,7 +1301,7 @@ def band(nav=None):
             # qui est aussi un groupe de boutons radio dans ce bandeau.
             with st.container(key="navbar"):
                 nav()
-        components.html(
+        st.iframe(
             (
             f'<style>{css}</style>'
             f'<div id="g">'

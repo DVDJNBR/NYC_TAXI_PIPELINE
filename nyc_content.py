@@ -28,7 +28,6 @@ import re
 from urllib.parse import quote
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 import nyc_lang
 import nyc_theme as theme
@@ -371,7 +370,8 @@ _PIPE_HTML = r"""
       --bg: __BG__; --panel: __PANEL__;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: transparent; }
+  html, body { margin: 0; padding: 0; background: transparent;
+               overflow: hidden; }
   body {
       color: var(--ink);
       font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
@@ -875,7 +875,7 @@ def _keys() -> list:
 
 
 def _pipeline_component() -> str:
-    """Le bloc animé, prêt pour components.html."""
+    """Le bloc animé, prêt pour st.iframe."""
     p = theme.palette()
     srcs = [{"id": s["id"], "color": s["color"], "enter": s["enter"]}
             for s in _sources()]
@@ -912,4 +912,4 @@ def render_pipeline_tab():
     la largeur disponible.
     """
     st.header(t("pipe.h.flow"))
-    components.html(_pipeline_component(), height=520, scrolling=False)
+    st.iframe(_pipeline_component(), height=520)
