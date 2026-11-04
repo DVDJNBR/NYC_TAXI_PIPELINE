@@ -25,11 +25,52 @@ done
 # dashboard : ils croisent la zone et le pas du cycle, et c'est J qui les
 # écrit, après G. Sans eux le cockpit n'affiche que son message d'absence,
 # ce qui en production revient à une page vide.
+#
+# La garde porte aussi sur le contenu de zone_cycle, et pas seulement sur
+# l'existence du fichier : le bloc des nombres lit onze colonnes que J
+# n'écrit que depuis la version 10 du payload (répartition des passagers,
+# moyens de paiement, minutes, milles, recette). Un fichier laissé par une
+# version antérieure existe, donc passait la garde, et nyc_live._city()
+# s'arrêtait net au premier rendu. Le schéma se lit sans charger les données.
+#
+# Elle compte aussi les pas du cycle dow, qui sont passés de 7 à 168 en
+# version 11 : les pas portent désormais l'heure. Une table d'avant a les
+# bonnes colonnes et le mauvais nombre de pas — elle passait donc la garde
+# du schéma, et la carte montrait une semaine de moyennes journalières, où
+# le cycle jour/nuit est écrasé. Seules deux colonnes sont lues.
+#
+# dur_cycle.parquet est la troisième table, écrite par le même script depuis
+# la version 10 : la case des durées en lit la distribution complète.
+needs_cycles=0
 if [ ! -f /app/data/aggregates/zone_cycle.parquet ] \
-   || [ ! -f /app/data/aggregates/od_cycle.parquet ]; then
+   || [ ! -f /app/data/aggregates/od_cycle.parquet ] \
+   || [ ! -f /app/data/aggregates/dur_cycle.parquet ]; then
+    needs_cycles=1
+elif ! python -c "
+import sys
+import pyarrow.parquet as pq
+import pyarrow.compute as pc
+P = '/app/data/aggregates/zone_cycle.parquet'
+cols = set(pq.read_schema(P).names)
+need = {'TOTAL_REVENUE', 'TRIPS_PAX', 'PAX_SOLO', 'PAX_DUO', 'PAX_TRIO',
+        'TRIPS_PAY', 'PAY_TIP', 'PAY_CARD', 'PAY_CASH', 'SUM_MINUTES'}
+if not need <= cols:
+    sys.exit(1)
+t = pq.read_table(P, columns=['SCOPE', 'STEP'])
+steps = pc.unique(t['STEP'].filter(pc.equal(t['SCOPE'], 'dow')))
+sys.exit(0 if len(steps) == 168 else 1)
+" 2>/dev/null; then
+    echo "zone_cycle.parquet est d'une version antérieure — reconstruction."
+    needs_cycles=1
+fi
+if [ "$needs_cycles" = 1 ]; then
     echo "Pré-calcul des cycles du cockpit (une seule fois, ~2min)..."
     python scripts/G_build_aggregates.py
     python scripts/J_build_cycles.py
+    # Les matrices de flux de la maquette sortent des mêmes agrégats : les
+    # reconstruire ensemble, sinon la carte montrerait la version livrée
+    # avec l'image pendant que le reste du cockpit lirait la neuve.
+    python scripts/K_city_trips.py
 fi
 
 # La maquette de ville, posée avant le premier visiteur. _serve_city() la

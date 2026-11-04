@@ -43,7 +43,12 @@ import nyc_live
 # Hauteurs des trois bandes, en pixels. Les composants vivent dans des
 # iframes de taille fixe : sans ces valeurs, deux blocs voisins ne s'alignent
 # pas.
-H_TOP = 170
+# La bande du haut a grandi deux fois, au temps où elle portait quatre cases
+# sur deux rangs. Elle n'en porte plus que deux, côte à côte sur un seul
+# rang : l'anneau des passagers et le nombre lié au panneau allumé. Sa
+# hauteur est donc désormais celle du ruban d'à côté, qui la partage — c'est
+# lui qui la fixe, pas les cases.
+H_TOP = 236
 H_CONTROLS = 70
 H_BOTTOM = 440
 
@@ -57,7 +62,11 @@ def render():
         )
         return
 
-    numbers, ribbon = st.columns([2, 3], gap="medium")
+    # Moitié-moitié, et non deux cinquièmes : l'anneau et sa légende demandent
+    # de la largeur côte à côte, et à deux cinquièmes la légende passait sous
+    # l'anneau. Le ruban, lui, lit ses vingt-quatre barres aussi bien sur la
+    # moitié de la page.
+    numbers, ribbon = st.columns([1, 1], gap="medium")
     with numbers:
         nyc_live.kpis(height=H_TOP)
     with ribbon:

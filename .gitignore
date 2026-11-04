@@ -233,3 +233,6 @@ static/
 
 # Traces laissées par une session d'automatisation de navigateur.
 .playwright-mcp/
+
+# Fichiers de débordement de DuckDB, écrits pendant les agrégations.
+.tmp/

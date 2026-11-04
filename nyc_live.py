@@ -26,13 +26,16 @@ personne n'ait à envoyer une image par trame.
 
 Trois cycles, exclusifs :
 
-    hour    24 pas, minuit -> minuit, tous jours confondus
-    dow      7 pas, lundi -> dimanche
-    month   12 pas, janvier -> décembre
+    hour     24 pas, minuit -> minuit, tous jours confondus
+    dow     168 pas, lundi 0 h -> dimanche 23 h
+    month    12 pas, janvier -> décembre
 
-Les valeurs sont des moyennes par occurrence du pas, calculées en amont par
+Les valeurs sont des moyennes par heure du pas, calculées en amont par
 scripts/J_build_cycles.py — un total brut ferait chuter novembre de moitié
-pour la seule raison qu'il n'est observé qu'une fois sur la période.
+pour la seule raison qu'il n'est observé qu'une fois sur la période, et
+gonflerait chaque pas de l'année d'un facteur vingt-quatre parce qu'il porte
+un mois entier. L'unité est donc la même sur les trois cycles, et un bloc de
+la carte y vaut partout vingt courses à l'heure.
 
 Transport : le binaire et les métadonnées sont servis depuis `static/`.
 Streamlit renvoie le HTML des composants à chaque réexécution du script, et
@@ -47,7 +50,6 @@ import uuid
 import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 import nyc_theme
 import nyc_zones
@@ -64,6 +66,7 @@ GEO = ROOT / "data" / "reference" / "taxi_zones.json"
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
 ZONE_CYCLE = ROOT / "data" / "aggregates" / "zone_cycle.parquet"
 OD_CYCLE = ROOT / "data" / "aggregates" / "od_cycle.parquet"
+DUR_CYCLE = ROOT / "data" / "aggregates" / "dur_cycle.parquet"
 
 CHANNEL = "nyc-cockpit"
 
@@ -102,27 +105,57 @@ DOW_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
 MONTH_SHORT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin",
                "Juil", "Août", "Sep", "Oct", "Nov", "Déc"]
 
-# Durée d'un pas, en millisecondes. Une seconde par heure : le temps de
-# parcourir la carte, de lire le pic qui monte et de revenir au ruban avant
-# que le pas ne change. En deçà, la page bouge plus vite qu'on ne la lit.
+def _hourly(names: list, shorts: list) -> tuple:
+    """Les libellés d'un cycle qui porte l'heure dans son pas.
+
+    `labels` donne le nom entier — « Lundi 14h » — et c'est ce que lisent les
+    commandes, qui ont la place. `short` sert au ruban, qui écrit sous chaque
+    barre à une trentaine de pixels d'intervalle : il n'y tient que l'heure,
+    et le nom du jour ne paraît qu'à minuit, là où le ruban change de
+    journée. Sa fenêtre fait seize barres, donc une borne nommée reste
+    presque toujours à l'écran.
+
+    Seule la semaine en a besoin : l'année garde un pas par mois.
+    """
+    labels, short = [], []
+    for i, name in enumerate(names):
+        for h in range(24):
+            labels.append(f"{name} {h}h")
+            short.append(shorts[i] if h == 0 else f"{h}h")
+    return labels, short
+
+
+DOW_HOURLY, DOW_HOURLY_SHORT = _hourly(DOW_LABELS, DOW_SHORT)
+
+# Durée d'un pas, en millisecondes. Les trois boucles font 40,8 s : le pas
+# est donc le quotient de cette durée par le nombre de pas, et non une valeur
+# choisie cycle par cycle. Une boucle de longueur constante permet de changer
+# de cycle sans réapprendre le rythme de la page.
 #
-# Un cycle court a besoin d'un pas plus long : sept jours à une seconde
-# feraient une boucle de sept secondes, soit un battement plutôt qu'une
-# lecture. La boucle vise la quarantaine de secondes dans les trois cas.
+# La semaine porte l'heure dans son pas — 168 pas — parce que ses sept
+# journées ont des formes vraiment différentes : leurs profils de 24 h
+# s'écartent de 6,3 à 26,3 % de la forme moyenne, et de 122 points l'un de
+# l'autre au pire. Le dimanche pique à minuit là où la forme moyenne pique à
+# 18 h, le samedi soir débordant dessus.
 #
-# Le pas tient maintenant une seconde et demie au moins : quatre nombres, une
-# carte et un ruban changent ensemble, et il faut le temps d'en lire un avant
-# que le suivant ne parte. Qui veut aller plus vite clique la barre voulue —
-# le ruban est devenu une règle, pas seulement un affichage.
+# L'année ne la porte pas, et c'est mesuré : ses douze profils de 24 h
+# s'écartent de 1,5 à 4,4 % seulement, et de 22,8 points au pire. Le mois le
+# plus atypique — janvier — pique à 18 h comme tous les autres. Mettre
+# l'heure dans ce cycle faisait 288 pas pour répéter douze fois la même
+# vague, et quadruplait le binaire pour rien.
+#
+# Reste que 243 ms ne laissent pas un nombre se poser en 420 ms : voir
+# rollMs() dans le composant des nombres, qui accorde la course des
+# compteurs et des arcs au pas du cycle.
 CYCLES = {
     "hour": {"steps": 24, "ms": 1700, "label": "Heure",
              "title": "Une journée type",
              "labels": [f"{h}h" for h in range(24)],
              "short": [f"{h}h" for h in range(24)]},
-    "dow": {"steps": 7, "ms": 2800, "label": "Jour",
-            "title": "Une semaine type", "labels": DOW_LABELS,
-            "short": DOW_SHORT},
-    "month": {"steps": 12, "ms": 2400, "label": "Mois",
+    "dow": {"steps": 168, "ms": 243, "label": "Jour",
+            "title": "Une semaine type, heure par heure",
+            "labels": DOW_HOURLY, "short": DOW_HOURLY_SHORT},
+    "month": {"steps": 12, "ms": 3400, "label": "Mois",
               "title": "Une année type", "labels": MONTH_LABELS,
               "short": MONTH_SHORT},
 }
@@ -133,18 +166,19 @@ MIN_TRIPS_PER_DAY = 1.0
 
 
 def available() -> bool:
-    return GEO.exists() and ZONE_CYCLE.exists() and OD_CYCLE.exists()
+    return (GEO.exists() and ZONE_CYCLE.exists() and OD_CYCLE.exists()
+            and DUR_CYCLE.exists())
 
 
 # Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
 # changement de structure ne serait pas vu tant que les agrégats ne sont pas
 # reconstruits, et le composant lirait un fichier à l'ancien format.
-PAYLOAD_VERSION = 4
+PAYLOAD_VERSION = 13
 
 
 @st.cache_data(show_spinner=False)
 def _build(version: int, geo_mtime: float, zone_mtime: float,
-           od_mtime: float) -> dict:
+           od_mtime: float, dur_mtime: float) -> dict:
     """Écrit les fichiers statiques et rend un résumé.
 
     Les dates de modification sont des arguments et non des lectures
@@ -156,7 +190,10 @@ def _build(version: int, geo_mtime: float, zone_mtime: float,
     côté des fichiers garde la même clé sur disque ; s'il correspond, les
     fichiers déjà écrits sont repris tels quels.
     """
-    key = {"version": version, "mtimes": [geo_mtime, zone_mtime, od_mtime]}
+    # dur_mtime fait partie de la clé : il manquait, et reconstruire la seule
+    # table des durées laissait donc le tampon valide et les fichiers périmés.
+    key = {"version": version,
+           "mtimes": [geo_mtime, zone_mtime, od_mtime, dur_mtime]}
     stamp = STATIC / "nyc_live.stamp.json"
     if stamp.exists() and (STATIC / "nyc_live.bin").exists() \
             and (STATIC / "nyc_live.json").exists():
@@ -172,6 +209,7 @@ def _compute() -> dict:
     geo = {z["id"]: z for z in json.loads(GEO.read_text())}
     zc = pd.read_parquet(ZONE_CYCLE)
     od = pd.read_parquet(OD_CYCLE)
+    dur = pd.read_parquet(DUR_CYCLE)
 
     # Le volume d'une journée moyenne sert de filtre : c'est le cycle
     # horaire qui le porte, puisque ses 24 pas couvrent une journée entière.
@@ -204,6 +242,8 @@ def _compute() -> dict:
         ],
         "measures": MEASURES,
         "cycles": {k: {**v, "scales": scales[k]} for k, v in CYCLES.items()},
+        "city": _city(zc, od),
+        "dur": _dur(dur),
         "flows": _flows(od),
         "areas": nyc_zones.AREAS,
         "areaColors": nyc_zones.AREA_COLORS,
@@ -212,6 +252,157 @@ def _compute() -> dict:
     return {"zones": len(kept),
             "bin_ko": (STATIC / "nyc_live.bin").stat().st_size // 1024,
             "json_ko": (STATIC / "nyc_live.json").stat().st_size // 1024}
+
+
+# Colonnes de zone_cycle.parquet dont le bloc des nombres a besoin, et que
+# scripts/J_build_cycles.py écrit depuis la version 5 du payload.
+CITY_COLUMNS = ["TOTAL_TRIPS", "TOTAL_REVENUE", "TRIPS_PAX", "PAX_SOLO",
+                "PAX_DUO", "PAX_TRIO", "TRIPS_PAY", "PAY_TIP", "PAY_CARD",
+                "PAY_CASH", "SUM_MINUTES", "MILES"]
+
+# Nombre de bacs de dur_cycle.parquet, qui doit valoir DUR_BINS du script J.
+# Il sert à réindexer : un pas dont un bac est vide n'a pas de ligne dans le
+# Parquet, et la case attend un tableau de longueur fixe.
+DUR_BINS = 31
+
+
+def _air(od: pd.DataFrame, scope: str, steps: int) -> dict:
+    """Les deux parts des courses d'aéroport, en pourcentage du pas.
+
+    Mesurées sur od_cycle et non sur zone_cycle : celui-ci ne connaît que la
+    zone de départ, et c'est justement la dissymétrie des deux sens qui fait
+    l'intérêt de la case. Les départs vers un aéroport se massent à 4 h et
+    5 h — 13,6 % des courses à 5 h contre 0,05 % à minuit — tandis que les
+    retours d'aéroport se répartissent sur la journée avec deux bosses,
+    16 h et 23 h. Les deux parts culminent donc aux antipodes de l'horloge.
+
+    Les quelques courses d'un aéroport à un autre sont comptées au départ :
+    elles existent, elles doivent tomber d'un côté, et elles partent bien
+    d'un aéroport. Les deux parts et leur complément font ainsi 100 % sans
+    reste.
+
+    Aucune course n'est exclue : contrairement au nombre de passagers et au
+    moyen de paiement, la zone de départ et celle d'arrivée sont renseignées
+    partout. Cette case n'a donc pas de base à déclarer.
+    """
+    air = nyc_zones.AIRPORT_AREA
+    part = od[od["SCOPE"] == scope]
+    pu, do = part["PU_AREA"] == air, part["DO_AREA"] == air
+    g = part.assign(
+        FROM=part["TOTAL_TRIPS"].where(pu, 0.0),
+        TO=part["TOTAL_TRIPS"].where(do & ~pu, 0.0),
+    ).groupby("STEP")[["TOTAL_TRIPS", "FROM", "TO"]].sum()
+    g = g.reindex(range(steps)).fillna(0.0)
+    tot = g["TOTAL_TRIPS"].replace(0.0, np.nan)
+    return {"fromair": g["FROM"] / tot * 100, "toair": g["TO"] / tot * 100}
+
+
+def _city(zc: pd.DataFrame, od: pd.DataFrame) -> dict:
+    """Les séries de la ville entière, un tableau par pas et par mesure.
+
+    Le binaire porte une grille par zone et par mesure : c'est ce qu'il faut
+    à la carte, qui extrude chaque zone. Le bloc des nombres, lui, ne lit
+    jamais une zone — il somme la ville. Faire voyager six grilles de plus
+    pour n'en lire que les totaux doublerait le binaire ; ces séries-là font
+    quelques centaines de nombres et tiennent en clair dans le JSON.
+
+    Les rapports sont faits ici et non dans le navigateur parce qu'ils
+    pèsent sur les numérateurs : une part se calcule sur la somme des
+    courses, jamais sur la moyenne des parts de zones — sans quoi une zone
+    de trois courses compterait autant que Midtown.
+    """
+    missing = [c for c in CITY_COLUMNS if c != "MILES" and c not in zc.columns]
+    if missing:
+        raise RuntimeError(
+            "zone_cycle.parquet est d'une version antérieure : "
+            + ", ".join(missing) + " manquent. "
+            "Relancer scripts/J_build_cycles.py."
+        )
+    out = {}
+    for scope, cycle in CYCLES.items():
+        part = zc[zc["SCOPE"] == scope]
+        # Les milles parcourus, zone par zone, avant de sommer : AVG_DISTANCE
+        # est une moyenne, et une somme de moyennes ne veut rien dire.
+        part = part.assign(MILES=part["AVG_DISTANCE"] * part["TOTAL_TRIPS"])
+        g = (part.groupby("STEP")[CITY_COLUMNS].sum()
+                 .reindex(range(cycle["steps"])).fillna(0.0))
+        pax = g["TRIPS_PAX"].replace(0.0, np.nan)
+        pay = g["TRIPS_PAY"].replace(0.0, np.nan)
+        trips = g["TOTAL_TRIPS"].replace(0.0, np.nan)
+        hours = (g["SUM_MINUTES"] / 60.0).replace(0.0, np.nan)
+        miles = g["MILES"].replace(0.0, np.nan)
+        # Deux dénominateurs, et non TOTAL_TRIPS : les courses sans
+        # passenger_count et celles sans moyen de paiement déclaré sont les
+        # mêmes 15,66 % de lignes, et leur taux suit l'heure — 9,9 % à 16 h,
+        # 39,6 % à 4 h. Au dénominateur, elles feraient raconter leurs trous
+        # aux deux cases plutôt que les passagers et les paiements.
+        series = {
+            "solo": g["PAX_SOLO"] / pax * 100,
+            "duo": g["PAX_DUO"] / pax * 100,
+            "trio": g["PAX_TRIO"] / pax * 100,
+            "tip": g["PAY_TIP"] / pay * 100,
+            "card": g["PAY_CARD"] / pay * 100,
+            "cash": g["PAY_CASH"] / pay * 100,
+            "mph": g["MILES"] / hours,
+            "dur": g["SUM_MINUTES"] / trips,
+            "dist": g["MILES"] / trips,
+            # La part des courses sur laquelle la répartition des passagers
+            # est calculée. Elle est affichée sous la case, et elle bouge
+            # autant que ce qu'elle qualifie : 60 % des courses déclarent un
+            # passager à 4 h, 90 % à 16 h. Sans elle, « 85,7 % seul » ne dit
+            # pas sur combien de courses il porte.
+            #
+            # Les trois parts de paiement et leur base restent calculées
+            # bien qu'aucune case ne les lise depuis la version 8 : elles
+            # font quelques centaines d'octets, et c'est le seul endroit du
+            # projet où l'on sait que payment_type = 0 et passenger_count
+            # vide sont exactement les mêmes 15,66 % de lignes.
+            "paxbase": g["TRIPS_PAX"] / trips * 100,
+            "paybase": g["TRIPS_PAY"] / trips * 100,
+            # Le prix du mile : les dollars encaissés divisés par les milles
+            # parcourus, et non la moyenne des prix du mile de chaque zone.
+            # Il raconte l'embouteillage, parce que le compteur facture au
+            # temps dès que le taxi ralentit — 5,83 $ le mile à 5 h quand la
+            # ville est vide, 9,37 $ à 18 h quand elle est bloquée. Son
+            # corollaire est qu'il suit la vitesse de très près, r = -0,94
+            # sur l'heure : les deux vont donc dans la même case, en miroir,
+            # au lieu d'en occuper deux à dire la même chose.
+            "mile": g["TOTAL_REVENUE"] / miles,
+        }
+        series.update(_air(od, scope, cycle["steps"]))
+        out[scope] = {k: [round(float(x), 4) for x in v.fillna(0.0)]
+                      for k, v in series.items()}
+    return out
+
+
+def _dur(dur: pd.DataFrame) -> dict:
+    """La distribution des durées, un tableau de parts par pas.
+
+    En pourcentage des courses du pas et non en comptes : la case compare la
+    forme d'un pas à la forme moyenne du cycle, et deux pas n'ont pas le même
+    volume — 739 courses à 4 h contre 7 939 à 18 h. En comptes, la case ne
+    montrerait que l'affluence, qui est déjà tout l'histogramme.
+
+    Les bacs vides n'ont pas de ligne dans le Parquet : d'où la réindexation
+    sur les 31 bacs, sans laquelle un tableau court décalerait la courbe.
+    """
+    out = {}
+    for scope, cycle in CYCLES.items():
+        part = dur[dur["SCOPE"] == scope]
+        grid = (part.pivot_table(index="STEP", columns="BIN",
+                                 values="TOTAL_TRIPS", aggfunc="sum")
+                    .reindex(index=range(cycle["steps"]),
+                             columns=range(DUR_BINS))
+                    .fillna(0.0)
+                    # En flottants : les comptes sortent du Parquet en
+                    # entiers, et la division en place refuserait d'y écrire
+                    # un rapport.
+                    .to_numpy(dtype=float))
+        total = grid.sum(axis=1, keepdims=True)
+        share = np.divide(grid * 100.0, total, out=np.zeros_like(grid),
+                          where=total > 0)
+        out[scope] = [[round(float(x), 3) for x in row] for row in share]
+    return out
 
 
 def _pack(grid: np.ndarray) -> tuple:
@@ -270,7 +461,8 @@ def _outer_ring(geometry: dict) -> list:
 def meta() -> dict:
     _serve_city()
     return _build(PAYLOAD_VERSION, GEO.stat().st_mtime,
-                  ZONE_CYCLE.stat().st_mtime, OD_CYCLE.stat().st_mtime)
+                  ZONE_CYCLE.stat().st_mtime, OD_CYCLE.stat().st_mtime,
+                  DUR_CYCLE.stat().st_mtime)
 
 
 def _serve_city() -> None:
@@ -319,16 +511,16 @@ def controls(height: int = 160, scope: str = "hour",
              measure: str = "trips") -> None:
     """Les boutons-panneaux et l'horloge du cockpit."""
     meta()
-    components.html(
+    st.iframe(
         _html(_controls_body(), _cfg(scope=scope, measure=measure)),
-        height=height, scrolling=False,
+        height=height,
     )
 
 
 def kpis(height: int = 160) -> None:
     """Quatre nombres qui suivent le pas de l'horloge."""
     meta()
-    components.html(_html(_KPIS, _cfg()), height=height, scrolling=False)
+    st.iframe(_html(_KPIS, _cfg()), height=height)
 
 
 # Angle de vue de la carte. Le centre et l'échelle, eux, ne sont pas fixés
@@ -346,8 +538,7 @@ def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
     head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
             if nyc_theme.mode() == "dark" else
             _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
-    components.html(_html(_MAP, _cfg(view=VIEW, head=head)),
-                    height=height, scrolling=False)
+    st.iframe(_html(_MAP, _cfg(view=VIEW, head=head)), height=height)
 
 
 def taxi_city(height: int = 460, title: str = "",
@@ -362,24 +553,22 @@ def taxi_city(height: int = 460, title: str = "",
     head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
             if nyc_theme.mode() == "dark" else
             _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
-    components.html(_html(_CITY, _cfg(head=head, legend=legend)),
-                    height=height, scrolling=False)
+    st.iframe(_html(_CITY, _cfg(head=head, legend=legend)), height=height)
 
 
 def profile(height: int = 240, title: str = "", hint: str = "") -> None:
     """Le ruban de barres qui défile vers la gauche."""
     meta()
-    components.html(_html(_PROFILE, _cfg(head=_head(title, hint))),
-                    height=height, scrolling=False)
+    st.iframe(_html(_PROFILE, _cfg(head=_head(title, hint))), height=height)
 
 
 def flows(height: int = 300, title: str = "", hint: str = "",
           legend: bool = False) -> None:
     """Les flux entre arrondissements, nœuds figés, rubans animés."""
     meta()
-    components.html(
+    st.iframe(
         _html(_FLOWS, _cfg(head=_head(title, hint), legend=legend)),
-        height=height, scrolling=False)
+        height=height)
 
 
 # ---------------------------------------------------------------------------
@@ -514,13 +703,27 @@ let META = null, BIN = null, Z = 0, READY = false;
    rangé zone par zone. L'ordre de lecture suit celui de l'écriture côté
    Python — cycles dans l'ordre du dictionnaire, mesures dans l'ordre de la
    liste. */
-const SERIES = {}, TOPS = {}, LOWS = {};
+const SERIES = {};
 
 /* État partagé. `at` est l'heure epoch du dernier changement de pas : chaque
    composant en déduit sa phase et anime en continu sans recevoir une image
    par trame. Date.now() et non performance.now(), dont l'origine diffère
    d'une iframe à l'autre. */
-let S = { scope: "hour", measure: "trips", step: 0, playing: true,
+/* La boucle démarre arrêtée si le système demande moins de mouvement.
+   WCAG 2.2.2 « Pause, Stop, Hide » est déjà tenu par le bouton des
+   commandes, et le bouton reste la réponse exigée : la préférence ne le
+   remplace pas. Mais l'inverse est vrai aussi. Les trois cycles tournent
+   40,8 s en boucle sans fin, bien au-delà des cinq secondes du critère ;
+   quelqu'un qui a posé la préférence au niveau du système ne devrait pas
+   avoir à désarmer cinq iframes à la main à chaque visite. Il voit donc le
+   premier pas, à l'arrêt, et part de là.
+
+   Chaque iframe fait la lecture pour son compte et toutes tombent d'accord,
+   la préférence étant la même pour toute la page. */
+const CALM = typeof matchMedia === "function"
+  && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let S = { scope: "hour", measure: "trips", step: 0, playing: !CALM,
           at: Date.now() };
 
 const channel = new BroadcastChannel(CFG.channel);
@@ -549,24 +752,15 @@ async function load() {
   Z = META.zones.length;
   let offset = 0;
   for (const scope of Object.keys(META.cycles)) {
-    SERIES[scope] = {}; TOPS[scope] = {}; LOWS[scope] = {};
+    SERIES[scope] = {};
     const n = META.cycles[scope].steps;
+    /* Plus de maximum ni de minimum relevés ici : ils ne servaient qu'à
+       l'échelle relative de la carte, que les blocs ont remplacée. C'était
+       un balayage de toutes les séries à chaque chargement de chacune des
+       cinq iframes — 332 640 entiers, cinq fois, pour rien. */
     for (const m of META.measures) {
-      const a = new Uint16Array(BIN, offset, Z * n);
+      SERIES[scope][m] = new Uint16Array(BIN, offset, Z * n);
       offset += Z * n * 2;
-      SERIES[scope][m] = a;
-      /* Le maximum, et le plus petit relevé non nul. Les deux servent à la
-         carte : rapportée à zéro, la distance moyenne — qui ne descend
-         jamais sous deux milles — mettait toutes les zones au plafond et la
-         ville devenait un bloc doré. Le zéro, lui, reste le zéro : c'est une
-         zone sans course, pas une zone à courses courtes. */
-      let hi = 1, lo = 65535;
-      for (let i = 0; i < a.length; i++) {
-        if (a[i] > hi) { hi = a[i]; }
-        if (a[i] > 0 && a[i] < lo) { lo = a[i]; }
-      }
-      TOPS[scope][m] = hi;
-      LOWS[scope][m] = lo < hi ? lo : 0;
     }
   }
   drawLegend();
@@ -1032,11 +1226,12 @@ function paintButtons() {
   });
   /* Le pas courant est écrit en clair : le ruban le montre aussi, mais le
      lire ici évite de chercher quelle barre porte l'accent.
-     En abrégé, parce qu'une borne porte une marque courte et non une
-     phrase — « 18H », « MAR », « JUIL ». Le cycle actif est lu juste à
-     côté, donc rien n'est ambigu. */
+     Le nom entier et non l'abrégé — « 18h », « Mardi 18h », « Juillet 18h ».
+     Depuis que la semaine et l'année portent l'heure, l'abrégé du ruban ne
+     dit plus que l'heure sur vingt-trois pas sur vingt-quatre : il faut le
+     nom du jour ou du mois ici, sans quoi on ne sait plus où l'on est. */
   document.getElementById("now").textContent =
-    META.cycles[S.scope].short[S.step];
+    META.cycles[S.scope].labels[S.step];
   document.getElementById("play").textContent = S.playing ? "❚❚" : "▶";
 }
 
@@ -1086,12 +1281,12 @@ channel.addEventListener("message", e => {
 """
 
 # ---------------------------------------------------------------------------
-# Composant 1 bis — les quatre nombres du pas courant
+# Composant 1 bis — les deux nombres du pas courant
 # ---------------------------------------------------------------------------
 _KPIS = r"""
 <style>
   #grid { position: absolute; inset: 0; display: grid;
-          grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+          grid-template-columns: 1fr 1fr; grid-template-rows: 1fr;
           gap: 8px 14px; }
   .kpi { display: flex; flex-direction: column; justify-content: center;
          min-width: 0; }
@@ -1100,6 +1295,35 @@ _KPIS = r"""
   .k-val { font-size: 1.15rem; font-weight: 600; line-height: 1.25;
            font-variant-numeric: tabular-nums; }
   .k-sub { font-size: 0.68rem; line-height: 1.3; }
+  /* La répartition des passagers : un anneau et sa légende, côte à côte.
+     Une barre de 7 px pour 80 / 14 / 6 écrasait les deux petites parts
+     contre le bord ; l'anneau leur donne un arc, et la légende le chiffre. */
+  .k-wide { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .k-donut { flex: 0 0 auto; width: 48px; height: 48px; }
+  /* La durée vient de --arc, que le composant pose à chaque pas depuis
+     rollMs() : les arcs et les nombres doivent se poser ensemble, et le pas
+     de la semaine est sept fois plus court que celui de la journée. La
+     valeur écrite ici ne sert qu'avant le premier pas. */
+  .k-donut .arc { transition: stroke-dasharray var(--arc, 0.42s) cubic-bezier(0, 0, 0.3, 1),
+                              stroke-dashoffset var(--arc, 0.42s) cubic-bezier(0, 0, 0.3, 1); }
+
+  /* La légende de la répartition. Une grille et non trois lignes libres :
+     sans la colonne fixe, les pourcentages ne s'alignent pas. */
+  .k-keys { display: flex; flex-direction: column; gap: 1px; min-width: 0;
+            flex: 1 1 auto; }
+  .k-key { display: grid; grid-template-columns: 7px 1fr auto; gap: 6px;
+           align-items: center; font-size: 0.64rem; line-height: 1.5; }
+  .k-key > i { width: 7px; height: 7px; display: block; }
+  .k-key .kt { display: flex; align-items: center; gap: 1px; min-width: 0;
+               overflow: hidden; }
+  .k-key .kv { font-weight: 600; font-variant-numeric: tabular-nums;
+               white-space: nowrap; }
+  .k-key .fig { width: 7px; height: 10px; fill: currentColor;
+                flex: 0 0 auto; }
+  .k-key .plus { font-weight: 700; font-size: 0.86em; margin-left: 1px; }
+
+  @media (prefers-reduced-motion: reduce) {
+      .k-donut .arc { transition: none; } }
   /* Chaque valeur est une case où deux textes se superposent, le sortant et
      l'entrant : ils occupent la même ligne et se croisent sur place. Un seul
      élément qu'on vide puis remplit laisserait une case vide entre les deux,
@@ -1141,31 +1365,86 @@ _KPIS = r"""
 
    Le nom de zone, lui, n'est pas un nombre : il ne compte pas, il se croise
    sur place. */
-/* Quatre nombres, une seule règle : ils doivent bouger dans le cycle. Un
+/* Quatre cases, une seule règle : elles doivent bouger dans le cycle. Un
    nombre qui ne bouge pas n'appartient pas au cockpit, il appartient à la
    fiche signalétique — et la fiche est maintenant en pied de page.
 
+   Les titres sont ceux d'une légende, pas d'un article : ils disent ce qui
+   est montré et rien de plus. L'interprétation, si elle vient un jour, sera
+   une phrase à part, pas un titre déguisé en conclusion.
+
    Mesuré sur les 24 pas de l'heure :
-     — le mile coûte 5,83 $ à 5 h et 9,37 $ à 18 h              (x1,6)
-     — hors Manhattan, 9,4 % des courses à 18 h, 26,7 % à 5 h   (x2,8)
-     — la moitié des courses tient dans 9 zones à 2 h, 17 à 5 h  (x1,9)
+     — un seul passager, 88,9 % des courses à 6 h, 74,4 % à 22 h
+     — deux passagers, 7,4 % à 6 h et 18,2 % à 22 h               (x2,5)
+     — plus de deux, 3,7 % à 6 h et 8,8 % à 2 h                   (x2,4)
+     — la vitesse, 10,1 mph à 17 h et 21,0 mph à 5 h              (x2,1)
+     — la durée, 13,4 min à 2 h et 20,4 min à 15 h                (x1,5)
+     — la carte sans pourboire, 3,8 % à 21 h et 13,9 % à 5 h      (x3,7)
+
+   Deux cases portent une répartition et non un nombre, parce que leurs parts
+   ne culminent pas au même pas : deux passagers le soir, plus de deux en
+   pleine nuit ; le pourboire au plus bas à 5 h, quand l'espèce est au plus
+   haut. Une part seule perdrait le décalage, et deux cases pour deux parts
+   d'un même tout les feraient lire comme deux mesures sans rapport.
+
+   Les deux répartitions excluent de leur dénominateur les courses qui ne
+   déclarent rien : 15,66 % des lignes, les mêmes pour le passager et pour
+   le paiement, avec un taux d'absence qui suit l'heure — 9,9 % à 16 h,
+   39,6 % à 4 h. Au dénominateur, les deux cases auraient raconté leurs
+   trous.
 
    Écarté : l'encaissé total, corrélé aux courses à 0,995, qui les redit en
    dollars ; la zone la plus active, qui est Midtown vingt-deux pas sur
-   vingt-quatre ; le prix d'une course, qui ne varie que de 24,30 à 34,71 $
-   et que le prix du mile dit mieux — un mile cher, c'est de la circulation,
-   une course chère peut n'être qu'un long trajet.
+   vingt-quatre ; le nombre moyen de passagers, qui ne va que de 1,18 à
+   1,39 et reste donc une case figée ; les minutes par mile, inverse exact
+   de la vitesse à -0,98, qui feraient deux cases pour un seul nombre.
 
-   La quatrième case suit le panneau allumé. Sans elle, choisir « Distance »
-   ne changeait rien de lisible hors de la carte : la commande pilotait un
-   bloc et laissait les nombres où ils étaient. */
-const CELLS = ["permile", "outer", "spread", "pick"];
-const CELL_LABEL = { permile: "Le prix du mile",
-                     outer: "Hors Manhattan",
-                     spread: "La moitié des courses" };
+   La quatrième case suit le panneau allumé, et dit l'écart au pas moyen
+   plutôt que la valeur brute. La valeur brute était la hauteur de la barre
+   allumée dans le ruban, en chiffres : la case était liée à la sélection
+   sans rien ajouter au dessin d'à côté. Le rang, lui, ne se lit nulle part
+   ailleurs. La valeur reste dessous, en petit, pour qui la cherche. */
+const CELLS = ["pax", "pick"];
+const CELL_LABEL = { pax: "Nombre de passagers" };
 
-/* Les zones qui ne sont pas de Manhattan, relevées une fois au démarrage. */
-let OUTER = [];
+/* Un bonhomme, deux bonshommes, deux bonshommes et un plus. Le dessin dit ce
+   que « 1 / 2 / 3+ » demandait de deviner, et il tient dans la hauteur d'une
+   ligne de légende. */
+const FIG = '<svg class="fig" viewBox="0 0 8 12" aria-hidden="true">'
+  + '<circle cx="4" cy="2.9" r="2.3"/>'
+  + '<path d="M0.5 12V9.5a3.5 3.5 0 0 1 7 0V12z"/></svg>';
+
+/* Les deux répartitions. `k` est la série dans META.city, `fig` l'étiquette
+   dessinée, `txt` celle que lisent les lecteurs d'écran et les légendes
+   textuelles. L'ordre est celui de l'empilement et des arcs. */
+const PARTS = {
+  pax: [
+    { k: "solo", fig: FIG, txt: "un passager", tone: 0.26 },
+    { k: "duo", fig: FIG + FIG, txt: "deux passagers", tone: 0.6 },
+    { k: "trio", fig: FIG + FIG + '<b class="plus">+</b>',
+      txt: "plus de deux", tone: 1 },
+  ],
+};
+
+/* Les teintes des parts. Une rampe et non trois couleurs : « un, deux, plus
+   de deux » est un ordre, et trois teintes sans rapport le feraient lire
+   comme trois catégories. tone = -1 sort de la rampe — l'espèce n'est pas un
+   degré de la carte, c'est autre chose, d'où la brique. */
+function tone(t) {
+  if (t < 0) { return C.brick; }
+  if (t >= 1) { return C.accent; }
+  return "color-mix(in oklab, " + C.accent + " "
+    + Math.round(t * 100) + "%, " + C.bg + ")";
+}
+
+/* Les séries de la ville, calculées par nyc_live._city() : une part se prend
+   sur la somme des courses, jamais sur la moyenne des parts de zones. */
+function cityS(key) { return META.city[S.scope][key]; }
+
+function atStep(key, step) {
+  const v = cityS(key), n = v.length;
+  return v[((step % n) + n) % n];
+}
 
 function boot() {
   const g = document.getElementById("grid");
@@ -1173,81 +1452,74 @@ function boot() {
     g.insertAdjacentHTML("beforeend",
       '<div class="kpi" id="c-' + key + '">'
       + '<div class="k-lab" style="color:' + C.dim + '"></div>'
-      + '<div class="k-val"></div>'
+      + cellBody(key)
       + '<div class="k-sub" style="color:' + C.dim + '"></div></div>');
   }
-  OUTER = [];
-  for (let z = 0; z < Z; z++) {
-    if (META.zones[z].borough !== "Manhattan") { OUTER.push(z); }
-  }
+  if (PARTS.pax) { buildDonut(); }
   onState();
 }
 
-/* Somme d'une mesure sur un sous-ensemble de zones, à un pas donné. */
-function sumAt(step, measure, zones) {
-  const n = stepsOf(S.scope);
-  const idx = ((step % n) + n) % n;
-  const a = SERIES[S.scope][measure];
-  let s = 0;
-  for (const z of zones) { s += a[z * n + idx]; }
-  return s * META.cycles[S.scope].scales[measure];
-}
-
-/* Milles parcourus par la ville : distance moyenne de chaque zone multipliée
-   par ses courses. Sommer les moyennes donnerait le même poids à une zone de
-   trois courses qu'à Midtown. */
-function cityMiles(step) {
-  const n = stepsOf(S.scope);
-  const idx = ((step % n) + n) % n;
-  const d = SERIES[S.scope].distance, t = SERIES[S.scope].trips;
-  const ds = META.cycles[S.scope].scales.distance;
-  const ts = META.cycles[S.scope].scales.trips;
-  let mi = 0;
-  for (let z = 0; z < Z; z++) {
-    mi += d[z * n + idx] * ds * t[z * n + idx] * ts;
+/* Le corps propre à chaque case, posé entre le titre et le sous-titre. */
+function cellBody(key) {
+  if (key === "pax") {
+    return '<div class="k-wide">'
+      + '<svg class="k-donut" viewBox="0 0 48 48" aria-hidden="true"></svg>'
+      + '<div class="k-keys"></div></div>';
   }
-  return mi;
+  return '<div class="k-val"></div>';
 }
 
-/* Ce que coûte un mille parcouru. C'est le seul nombre du bloc qui parle de
-   circulation : le tarif compte au mille et à la minute, donc un mille cher
-   est un mille lent. */
-function perMile(step) {
-  const mi = cityMiles(step);
-  return mi ? cityAt(step, "revenue") / mi : 0;
+/* Trois arcs sur un même cercle. Chacun porte sa longueur en dasharray et
+   son départ en dashoffset : une transition CSS sur ces deux propriétés
+   suffit alors à faire tourner la répartition sans la redessiner. */
+const DONUT_R = 19, DONUT_C = 2 * Math.PI * DONUT_R;
+
+function buildDonut() {
+  const el = document.querySelector("#c-pax .k-donut");
+  el.innerHTML = PARTS.pax.map((p, i) =>
+    '<circle class="arc a' + i + '" cx="24" cy="24" r="' + DONUT_R + '"'
+    + ' fill="none" stroke="' + tone(p.tone) + '" stroke-width="7"'
+    + ' stroke-dasharray="0 ' + DONUT_C.toFixed(2) + '"'
+    + ' transform="rotate(-90 24 24)"/>').join("");
+  buildKeys("pax");
 }
 
-/* Part des courses qui ne partent pas de Manhattan. La nuit la ville se
-   replie sur l'île ; au petit matin, un quart des départs sont ailleurs. Le
-   ruban dit quelles liaisons, ce nombre dit combien. */
-function outerShare(step) {
-  const t = cityAt(step, "trips");
-  return t ? sumAt(step, "trips", OUTER) / t * 100 : 0;
+/* La légende : une pastille de la teinte, l'étiquette, la part. Les trois
+   lignes gardent la même grille, sinon les pourcentages ne s'alignent pas. */
+function buildKeys(key) {
+  const el = document.querySelector("#c-" + key + " .k-keys");
+  el.innerHTML = PARTS[key].map((p, i) =>
+    '<div class="k-key"><i style="background:' + tone(p.tone) + '"></i>'
+    + '<span class="kt">' + (p.fig || p.txt) + "</span>"
+    + '<b class="kv" id="kv-' + key + "-" + i + '"></b></div>').join("");
 }
 
-/* Combien de zones il faut pour tenir la moitié des courses. La ville se
-   resserre la nuit sur une poignée de quartiers et s'étale au petit matin ;
-   un seul nombre le dit, là où une carte demande d'être lue. */
-function halfSpread(step) {
-  const n = stepsOf(S.scope);
-  const idx = ((step % n) + n) % n;
-  const a = SERIES[S.scope].trips;
-  const v = [];
-  let tot = 0;
-  for (let z = 0; z < Z; z++) {
-    const x = a[z * n + idx];
-    if (x > 0) { v.push(x); tot += x; }
+/* L'ordonnée d'une valeur dans la case en miroir : la médiane, plus ou
+   moins l'amplitude de sa propre série. */
+function setParts(key, step, delay) {
+  const vals = PARTS[key].map(p => atStep(p.k, step));
+  if (key === "pax") {
+    const el = document.querySelector("#c-pax .k-donut");
+    let acc = 0;
+    PARTS.pax.forEach((p, i) => {
+      const len = DONUT_C * vals[i] / 100;
+      const arc = el.querySelector(".a" + i);
+      arc.setAttribute("stroke-dasharray",
+        len.toFixed(2) + " " + (DONUT_C - len).toFixed(2));
+      arc.setAttribute("stroke-dashoffset", (-DONUT_C * acc / 100).toFixed(2));
+      acc += vals[i];
+    });
   }
-  v.sort((x, y) => y - x);
-  let acc = 0, k = 0;
-  while (k < v.length && acc < tot / 2) { acc += v[k]; k++; }
-  return k;
+  PARTS[key].forEach((p, i) => {
+    rollCell(document.getElementById("kv-" + key + "-" + i),
+             key + "/" + i, vals[i], x => un(x, 1) + " %",
+             delay + i * 50);
+  });
 }
+
+function un(x, n) { return x.toFixed(n).replace(".", ","); }
 
 function cellValue(key, step) {
-  if (key === "permile") { return perMile(step); }
-  if (key === "outer") { return outerShare(step); }
-  if (key === "spread") { return halfSpread(step); }
   return cityValue(step, S.measure);
 }
 
@@ -1255,15 +1527,29 @@ function cellLabel(key) {
   return key === "pick" ? MEASURE_LABEL[S.measure] : CELL_LABEL[key];
 }
 
-function cellFormat(key) {
-  if (key === "permile") {
-    return x => "$" + x.toFixed(2).replace(".", ",") + " / mi";
-  }
-  if (key === "outer") {
-    return x => x.toFixed(1).replace(".", ",") + " %";
-  }
-  if (key === "spread") { return x => Math.round(x) + " zones"; }
-  return x => fmt(x, S.measure);
+function cellFormat(key, avg) {
+  return x => (avg ? signed(x / avg) : fmt(x, S.measure));
+}
+
+/* Le pas moyen auquel la case se compare, nommé pour qu'on sache sur quoi
+   porte l'écart. Tout est en courses par heure sur les trois cycles, donc
+   c'est toujours une heure moyenne ; ce qui change est le cycle sur lequel
+   la moyenne est prise. */
+const MEAN_WORD = { hour: "vs une heure moyenne de la journée",
+                    dow: "vs une heure moyenne de la semaine",
+                    month: "vs une heure moyenne de l'année" };
+
+/* La base de chaque répartition : la part des courses qui déclarent le
+   champ. Un quatrième arc « ? » aurait été plus visible, mais il aurait
+   changé la question : l'anneau répondrait « que sait-on des passagers »
+   au lieu de « combien de passagers », et à 4 h, où 40 % des courses ne
+   déclarent rien, cet arc écraserait les trois autres. La base est donc
+   dite à côté de la répartition, pas dedans — et elle bouge autant que
+   ce qu'elle qualifie, de 60 % à 90 % des courses selon l'heure. */
+const SUB_BASE = { pax: "paxbase" };
+
+function subFormat(key) {
+  return x => MEAN_WORD[S.scope] + " · " + fmt(x, S.measure);
 }
 
 /* La courbe du cycle entier, mise en cache : elle ne change qu'avec le cycle
@@ -1323,7 +1609,18 @@ function cycleAverage(key) {
   return v.length ? s / v.length : 0;
 }
 
-const ROLL_MS = 420, STAGGER = 70;
+/* La course du compteur et le décalage entre cases suivent le pas du cycle,
+   au lieu d'être deux constantes.
+
+   Les trois boucles durent maintenant 40,8 s, donc le pas vaut 1 700 ms sur
+   la journée, 3 400 ms sur l'année — et 243 ms sur la semaine, qui compte
+   168 pas. Une course fixe de 420 ms n'y finirait jamais avant le pas
+   suivant : le nombre resterait une texture mouvante au lieu de se poser. Le
+   plafond reste 420 ms, qui est le bon rythme quand le pas en laisse la
+   place ; sous un pas de 700 ms, la course prend six dixièmes du pas et le
+   nombre se lit encore. */
+function rollMs() { return Math.min(420, META.cycles[S.scope].ms * 0.6); }
+function stagger() { return Math.min(70, META.cycles[S.scope].ms * 0.12); }
 const SOFT = window.matchMedia
   && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -1334,22 +1631,34 @@ const LAST = {}, ANIM = {};
 
 /* Compte de l'ancienne valeur à la nouvelle. `render` fait le texte, ce qui
    garde ici la même mise en forme qu'ailleurs — francs, miles, pourcentage —
-   sans que cette fonction ait à savoir laquelle. */
+   sans que cette fonction ait à savoir laquelle.
+
+   `to` est un nombre, ou un tableau quand la case porte deux séries. Les
+   deux termes comptent alors ensemble et la ligne arrive d'un seul
+   mouvement ; recomposée terme par terme, elle se lirait comme deux cases
+   mal alignées. */
 function rollCell(el, key, to, render, delay) {
   let span = el.firstElementChild;
   if (!span) { span = document.createElement("span"); el.appendChild(span); }
+  const many = Array.isArray(to);
   const from = LAST[key] === undefined ? to : LAST[key];
   LAST[key] = to;
   if (ANIM[key]) { cancelAnimationFrame(ANIM[key]); ANIM[key] = 0; }
-  if (from === to || SOFT) { span.textContent = render(to); return; }
+  const same = many ? from.every((x, i) => x === to[i]) : from === to;
+  if (same || SOFT) { span.textContent = render(to); return; }
+  const mix = e => many ? from.map((x, i) => x + (to[i] - x) * e)
+                        : from + (to - from) * e;
   span.textContent = render(from);
   const t0 = performance.now() + delay;
+  /* La durée est figée au départ de la course : la relire à chaque trame
+     ferait changer la vitesse en plein vol si le cycle change. */
+  const ms = rollMs();
   const tick = now => {
     /* Avant t0 la fraction est nulle : c'est ainsi que se fait l'attente de
        la case, sans minuteur à annuler si le pas change entre-temps. */
-    const u = Math.max(0, Math.min(1, (now - t0) / ROLL_MS));
+    const u = Math.max(0, Math.min(1, (now - t0) / ms));
     const e = 1 - Math.pow(1 - u, 3);
-    span.textContent = render(from + (to - from) * e);
+    span.textContent = render(mix(e));
     ANIM[key] = u < 1 ? requestAnimationFrame(tick) : 0;
   };
   ANIM[key] = requestAnimationFrame(tick);
@@ -1359,11 +1668,15 @@ function rollCell(el, key, to, render, delay) {
    bouge si le texte est le même : la distance moyenne et la zone la plus
    active tiennent souvent plusieurs pas, et les faire clignoter sans qu'elles
    changent dirait un changement qui n'a pas eu lieu. */
-function setCell(el, text) {
+/* `html` n'est vrai que pour la case des paliers, dont le grand nombre porte
+   deux morceaux de typographie différente — le montant et sa plage horaire.
+   Le texte, lui, reste posé en textContent partout ailleurs. */
+function setCell(el, text, html) {
   const cur = el.lastElementChild;
-  if (cur && cur.textContent === text) { return; }
+  const same = cur && (html ? cur.innerHTML === text : cur.textContent === text);
+  if (same) { return; }
   const next = document.createElement("span");
-  next.textContent = text;
+  if (html) { next.innerHTML = text; } else { next.textContent = text; }
   next.className = "in";
   el.appendChild(next);
   /* Deux images : la première pose l'état d'entrée, la seconde le relâche.
@@ -1387,22 +1700,35 @@ function signed(ratio) {
 }
 
 function onState() {
+  /* Les arcs de l'anneau suivent la même durée que les compteurs. */
+  document.documentElement.style.setProperty("--arc", rollMs() + "ms");
   CELLS.forEach((key, rank) => {
     const cell = document.getElementById("c-" + key);
-    const avg = cycleAverage(key);
-    const render = cellFormat(key);
-    const delay = rank * STAGGER;
-    /* La case liée au panneau allumé prend la brique, comme le panneau et
-       comme la barre du présent dans le ruban : trois endroits, une seule
-       couleur pour dire « c'est ceci que vous avez choisi ». */
-    cell.querySelector(".k-val").style.color =
-      key === "pick" ? C.brick : C.ink;
+    const delay = rank * stagger();
     setCell(cell.querySelector(".k-lab"), cellLabel(key));
-    rollCell(cell.querySelector(".k-val"), key, cellValue(key, S.step),
-             render, delay);
-    rollCell(cell.querySelector(".k-sub"), key + "/sub",
-             cellValue(key, S.step),
-             x => (avg ? signed(x / avg) + " vs moyenne" : ""), delay);
+    if (PARTS[key]) {
+      setParts(key, S.step, delay);
+    } else {
+      /* La moyenne du cycle ne sert qu'à la case liée au panneau : c'est
+         elle qui dit l'écart, les autres disent une valeur. */
+      const avg = key === "pick" ? cycleAverage(key) : 0;
+      /* La case liée au panneau allumé prend la brique, comme le panneau et
+         comme la barre du présent dans le ruban : trois endroits, une seule
+         couleur pour dire « c'est ceci que vous avez choisi ». */
+      cell.querySelector(".k-val").style.color =
+        key === "pick" ? C.brick : C.ink;
+      rollCell(cell.querySelector(".k-val"), key, cellValue(key, S.step),
+               cellFormat(key, avg), delay);
+    }
+    const sub = cell.querySelector(".k-sub");
+    if (SUB_BASE[key]) {
+      rollCell(sub, key + "/sub", atStep(SUB_BASE[key], S.step),
+               x => "sur " + un(x, 0) + " % des courses, les autres ne "
+                    + "déclarent rien", delay);
+    } else {
+      rollCell(sub, key + "/sub", cellValue(key, S.step),
+               subFormat(key), delay);
+    }
   });
 }
 </script>
@@ -1430,9 +1756,39 @@ let deckgl = null;
    trois heures du matin s'effaceraient au lieu de se montrer basses. */
 const NIGHT = CFG.mode === "dark";
 
-/* Hauteur de la plus haute colonne, en mètres. Chaque mesure est ramenée à
-   son propre maximum : sans quoi la distance moyenne resterait au sol. */
+/* Hauteur de la plus haute colonne, en mètres. */
 const TOP_M = 9000;
+
+/* Les colonnes comptent des blocs, elles ne mesurent plus une proportion.
+   Avant, la hauteur valait (valeur - minimum) / amplitude : une échelle
+   relative, et donc illisible, parce que l'écart entre zones est énorme. Au
+   pas le plus chargé du cycle horaire, le pic fait 465,3 courses/h et la
+   zone médiane 0,75 — un rapport de 617. Sur neuf kilomètres de colonne,
+   la zone médiane faisait onze mètres, et les deux cents zones du bas se
+   confondaient en une croûte au ras du sol.
+
+   Un bloc vaut donc une quantité nommée, et l'arrondi est fait au supérieur :
+   toute zone qui a au moins une course garde un bloc entier. Rien ne
+   disparaît sous le seuil du pixel, et l'œil compte au lieu d'estimer.
+
+   Les trois unités sont choisies pour que le pic tienne autour de trente
+   blocs dans les trois mesures — 33 pour les courses, 31 pour la recette,
+   33 pour la distance. Un bloc garde ainsi la même hauteur quelle que soit
+   la mesure et quel que soit le cycle, ce qu'une échelle relative interdit.
+
+   La contrepartie est assumée : au pas le plus chargé, 208 zones sur 259 se
+   retrouvent à un seul bloc. On gagne la visibilité du bas de l'échelle, on
+   y perd la discrimination. C'est l'inverse exact du défaut précédent. */
+const UNIT = { trips: 20, revenue: 1500, distance: 1.5 };
+const UNIT_LABEL = { trips: "20 courses/h", revenue: "1 500 $/h",
+                     distance: "1,5 mi" };
+const MAX_BLOCKS = 34;
+const BLOCK_M = TOP_M / MAX_BLOCKS;
+
+function blocksOf(real, measure) {
+  if (!(real > 0)) { return 0; }
+  return Math.ceil(real / UNIT[measure]);
+}
 
 const RAMP = NIGHT ? { a: [58, 54, 67], b: [226, 172, 70] }
                    : { a: [168, 164, 178], b: [169, 116, 26] };
@@ -1505,8 +1861,12 @@ function boot() {
     onHover: info => {
       if (!info || !info.object) { tipAt(0, 0, null); return; }
       const d = info.object;
+      /* L'infobulle énonce l'unité : sans elle, une pile de blocs se compte
+         mais ne se traduit pas. */
       tipAt(info.x, info.y, "<b>" + d.name + "</b><br>" + d.borough + " · "
-            + fmt(scaled(d.i, S.step, S.scope, S.measure), S.measure));
+            + fmt(scaled(d.i, S.step, S.scope, S.measure), S.measure)
+            + "<br>" + d.n + (d.n === 1 ? " bloc" : " blocs")
+            + " · 1 bloc = " + UNIT_LABEL[S.measure]);
     },
     layers: [],
   });
@@ -1534,21 +1894,24 @@ function onState() { /* la boucle d'animation suit d'elle-même */ }
 function frame() {
   if (deckgl && META) {
     const t = phase();
-    const hi = TOPS[S.scope][S.measure];
-    const lo = LOWS[S.scope][S.measure];
-    const span = Math.max(1, hi - lo);
+    /* Le compte de blocs se prend sur la valeur interpolée, et non l'inverse :
+       un bloc paraît ou s'efface quand la zone franchit son seuil, ce qui
+       garde la pile entière à tout instant. Interpoler des hauteurs donnerait
+       des fractions de bloc, donc des piles qu'on ne peut plus compter. */
+    const sc = META.cycles[S.scope].scales[S.measure];
     const rows = META.zones.map((zone, i) => {
       const a = value(i, S.step, S.scope, S.measure);
       const b = value(i, S.step + 1, S.scope, S.measure);
-      const raw = a + (b - a) * t;
-      return { ...zone, i: i, v: raw <= 0 ? 0 : Math.max(0, (raw - lo) / span) };
+      const n = blocksOf((a + (b - a) * t) * sc, S.measure);
+      return { ...zone, i: i, n: n, v: Math.min(1, n / MAX_BLOCKS) };
     });
     deckgl.setProps({ layers: [new deck.PolygonLayer({
       id: "zones", data: rows, extruded: true, filled: true, pickable: true,
       getPolygon: d => d.polygon,
-      getElevation: d => Math.max(d.v * TOP_M, 30),
+      getElevation: d => d.n * BLOCK_M,
       /* Rampe en puissance : la racine remonte les zones moyennes, qui
-         resteraient autrement indistinctes du fond. */
+         resteraient autrement indistinctes du fond. Elle suit le compte de
+         blocs, pour que la teinte et la hauteur disent la même chose. */
       getFillColor: d => {
         const u = Math.pow(d.v, 0.45);
         return [RAMP.a[0] + u * (RAMP.b[0] - RAMP.a[0]),
@@ -1611,7 +1974,36 @@ const JITTER = 0.0011;
 const IN = 0.20, OUT = 0.80;  /* part du trajet passée à rejoindre l'axe    */
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
+/* Les sept secteurs dessinés. Staten Island en est absent — six courses par
+   jour — et « Airports » aussi, mais pour une autre raison : JFK, LaGuardia
+   et Newark sont à trente-cinq kilomètres les uns des autres, et un centre
+   de gravité entre eux tomberait dans la baie. Le volume de ce secteur est
+   donc réparti entre deux nœuds de dessin, JFK et LaGuardia, au prorata
+   mesuré de chaque pas — il bouge : JFK prend 97 % des départs à 5 h et 40 %
+   à 10 h. Newark n'en est pas : les taxis jaunes n'y chargent pas, trois
+   courses sur toute la période. */
 const SECTORS = [0, 1, 2, 3, 4, 5, 6];
+let AIRSEC = -1, AIRNODE = [];
+
+/* La position d'un nœud. Les neuf secteurs la lisent dans CITY.lonlat, les
+   deux aéroports dans CITY.air : leurs indices prennent la suite. */
+function nodeAt(i) {
+  return i < CITY.lonlat.length ? CITY.lonlat[i]
+                                : AIRNODE[i - CITY.lonlat.length].lonlat;
+}
+
+/* Un secteur développé en nœuds de dessin et en poids. Tout secteur vaut
+   pour lui-même ; celui des aéroports vaut pour deux. */
+function spread(s) {
+  if (s !== AIRSEC || !AIRNODE.length) { return [[s, 1]]; }
+  const sh = CITY.air.share[S.scope] || CITY.air.share.hour;
+  const w = sh[((S.step % sh.length) + sh.length) % sh.length];
+  const out = [];
+  for (let k = 0; k < AIRNODE.length; k++) {
+    if (w[k] > 0) { out.push([AIRNODE[k].pool, w[k]]); }
+  }
+  return out.length ? out : [[AIRNODE[0].pool, 1]];
+}
 
 /* Le ruban et la carte nomment les mêmes neuf zones : ils en prennent donc
    la même couleur, à deux intensités. Le ruban la porte pleine — entre neuf
@@ -1676,27 +2068,24 @@ let deckgl = null, VIEWSTATE = null, LABEL_POS = null, started = 0;
 
 function pick(s) { return POOL[s][(Math.random() * POOL[s].length) | 0]; }
 
-/* Les 24 pas de l'heure sont la seule granularité de ce payload. Sur les
-   autres cycles on montre la journée moyenne plutôt que de laisser le bloc
-   figé sur un pas qui ne veut rien dire. */
+/* Un tableau de flux par cycle, et non les seules vingt-quatre heures.
+   Jusqu'ici le jour et le mois n'avaient que leur moyenne — un seul nombre,
+   le même aux sept ou douze pas : le nombre de taxis ne bougeait pas d'un
+   lundi à un samedi.
+
+   L'unité est la course par heure sur les trois cycles. Un pas de mois
+   compte un mois entier, vingt-quatre fois un pas d'heure ; à un taxi par
+   course, l'année aurait affiché 120 000 voitures contre 5 000 à l'heure.
+   scripts/J_build_cycles.py divise donc les pas de mois par vingt-quatre à
+   l'écriture des agrégats, et un taxi vaut partout la même chose : une
+   course de l'heure moyenne du pas. */
 function matrix() {
-  if (S.scope === "hour") { return CITY.trips[S.step % 24]; }
-  const n = CITY.order.length;
-  const out = [];
-  for (let a = 0; a < n; a++) {
-    const row = [];
-    for (let b = 0; b < n; b++) {
-      let v = 0;
-      for (let h = 0; h < 24; h++) { v += CITY.trips[h][a][b]; }
-      row.push(v / 24);
-    }
-    out.push(row);
-  }
-  return out;
+  const m = CITY.trips[S.scope] || CITY.trips.hour;
+  return m[((S.step % m.length) + m.length) % m.length];
 }
 
 function axesFor(a, b, n) {
-  const A = CITY.lonlat[a], B = CITY.lonlat[b];
+  const A = nodeAt(a), B = nodeAt(b);
   const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
   const len = Math.hypot(dx, dy) || 1;
   const px = -dy / len / KLAT, py = dx / len;
@@ -1717,34 +2106,45 @@ function build() {
   const o = [], e1 = [], e2 = [], d = [], inv = [], ph = [];
   const rp = [];
   AXES = [];
-  for (const a of SECTORS) {
-    for (const b of SECTORS) {
-      const n = Math.round(m[a][b]);
-      if (n <= 0) { continue; }
-      if (a === b) {
-        for (let k = 0; k < n; k++) {
-          const p = pick(a);
-          rp.push(p[0], p[1], REST);
+  /* Les secteurs de départ et d'arrivée possibles : les sept dessinés, plus
+     celui des aéroports, que spread() développera en deux nœuds. */
+  const SRC = AIRSEC >= 0 ? SECTORS.concat([AIRSEC]) : SECTORS;
+  for (const sa of SRC) {
+    for (const sb of SRC) {
+      if (!(m[sa][sb] > 0)) { continue; }
+      for (const [a, wa] of spread(sa)) {
+        for (const [b, wb] of spread(sb)) {
+          const n = Math.round(m[sa][sb] * wa * wb);
+          if (n <= 0) { continue; }
+          /* a === b et non sa === sb : une course JFK → LaGuardia part bien
+             d'un nœud pour un autre, alors qu'elle reste dans le secteur. */
+          if (a === b) {
+            for (let k = 0; k < n; k++) {
+              const p = pick(a);
+              rp.push(p[0], p[1], REST);
+            }
+            continue;
+          }
+          const na = Math.max(1, Math.min(MAX_AXIS, Math.round(n / PER_AXIS)));
+          const ax = axesFor(a, b, na);
+          for (const q of ax) {
+            AXES.push({ s: [q[0][0], q[0][1], ALT],
+                        t: [q[1][0], q[1][1], ALT] });
+          }
+          for (let k = 0; k < n; k++) {
+            const q = ax[(Math.random() * na) | 0];
+            const j = (Math.random() - 0.5) * 2 * JITTER;
+            const P = pick(a), Q = pick(b);
+            const x1 = q[0][0] + q[2][0] * j, y1 = q[0][1] + q[2][1] * j;
+            const x2 = q[1][0] + q[2][0] * j, y2 = q[1][1] + q[2][1] * j;
+            const L = Math.hypot((x1 - P[0]) * KLAT, y1 - P[1])
+                    + Math.hypot((x2 - x1) * KLAT, y2 - y1)
+                    + Math.hypot((Q[0] - x2) * KLAT, Q[1] - y2) || 0.01;
+            o.push(P[0], P[1]); e1.push(x1, y1); e2.push(x2, y2);
+            d.push(Q[0], Q[1]);
+            inv.push(SPEED / L); ph.push(Math.random());
+          }
         }
-        continue;
-      }
-      const na = Math.max(1, Math.min(MAX_AXIS, Math.round(n / PER_AXIS)));
-      const ax = axesFor(a, b, na);
-      for (const q of ax) {
-        AXES.push({ s: [q[0][0], q[0][1], ALT], t: [q[1][0], q[1][1], ALT] });
-      }
-      for (let k = 0; k < n; k++) {
-        const q = ax[(Math.random() * na) | 0];
-        const j = (Math.random() - 0.5) * 2 * JITTER;
-        const P = pick(a), Q = pick(b);
-        const x1 = q[0][0] + q[2][0] * j, y1 = q[0][1] + q[2][1] * j;
-        const x2 = q[1][0] + q[2][0] * j, y2 = q[1][1] + q[2][1] * j;
-        const L = Math.hypot((x1 - P[0]) * KLAT, y1 - P[1])
-                + Math.hypot((x2 - x1) * KLAT, y2 - y1)
-                + Math.hypot((Q[0] - x2) * KLAT, Q[1] - y2) || 0.01;
-        o.push(P[0], P[1]); e1.push(x1, y1); e2.push(x2, y2);
-        d.push(Q[0], Q[1]);
-        inv.push(SPEED / L); ph.push(Math.random());
       }
     }
   }
@@ -1758,6 +2158,35 @@ function build() {
   for (let i = 0; i < nr; i++) { ra[i] = Math.random() * 360; }
   SIT = { n: nr, pos: new Float32Array(rp), ang: ra };
   STATIC = staticLayers();
+  sayCount(nm + nr);
+}
+
+/* Le compte des taxis à l'écran, sous le titre. Un taxi vaut une course :
+   sans le nombre, on ne sait pas si la ville s'est vidée ou si le cadrage a
+   changé, et on ne peut pas comparer deux pas de mémoire. L'unité est dite
+   avec, parce qu'elle n'est pas évidente sur les cycles du jour et du mois,
+   où un pas compte une journée entière — voir matrix(). */
+/* La ligne est créée au chargement et non au premier compte : le socle ne
+   pose un `i` que si le bloc a une phrase d'aide, et la carte n'en a pas.
+   La créer plus tard aurait fait grandir le titre après la mise en page. */
+const COUNT_EL = (function () {
+  const head = document.getElementById("head");
+  if (!head) { return null; }
+  let i = head.querySelector("i");
+  if (!i) {
+    i = document.createElement("i");
+    i.style.display = "block";
+    i.style.fontSize = "0.72rem";
+    i.style.fontStyle = "normal";
+    i.style.color = (CFG.head && CFG.head.dim) || C.dim;
+    head.appendChild(i);
+  }
+  return i;
+})();
+function sayCount(n) {
+  if (!COUNT_EL) { return; }
+  COUNT_EL.textContent = FR(n) + " taxis à l'écran — un taxi, une course de "
+    + "l'heure moyenne du pas";
 }
 
 /* Trois segments : décollage vers l'axe, traversée à altitude constante,
@@ -1928,8 +2357,12 @@ function fitted() {
   const el = document.getElementById("city");
   const W = el.clientWidth || 600;
   let w = 180, s = 90, e = -180, n = -90;
-  for (const a of SECTORS) {
-    const c = CITY.lonlat[a];
+  /* Les nœuds d'aéroport entrent dans l'emprise : JFK est à l'est du Queens,
+     et sans lui dans le calcul les taxis qui s'y posent tombaient hors
+     cadre. Le cadrage recule de quelques pour cent, c'est le prix. */
+  const pts = SECTORS.map(a => CITY.lonlat[a])
+                     .concat(AIRNODE.map(d => d.lonlat));
+  for (const c of pts) {
     if (c[0] < w) { w = c[0]; }
     if (c[0] > e) { e = c[0]; }
     if (c[1] < s) { s = c[1]; }
@@ -1982,6 +2415,10 @@ async function boot() {
     .filter(z => AIR_CODE[z.name])
     .map(z => ({ code: AIR_CODE[z.name], lon: z.lon, lat: z.lat }));
   AIR_RGB = rgb((META.areaColors || {})["Airports"] || C.dim);
+  if (CITY.air) {
+    AIRSEC = CITY.air.sector;
+    AIRNODE = CITY.air.node;
+  }
   fatten();
   deckgl = new deck.DeckGL({
     container: "city",
@@ -2089,11 +2526,27 @@ function boot() {
 
 function totals(step) {
   /* Somme sur toutes les zones : le ruban parle de la ville entière, la
-     carte parle de chaque quartier. */
-  let s = 0;
+     carte parle de chaque quartier.
+
+     Sauf pour la distance, qui n'est pas une quantité mais une moyenne. La
+     sommer donnait 573,7 mi à 5 h — l'addition de quatre-vingt-dix-huit
+     moyennes de zones, un nombre sans unité, là où la ville roule 5,65 mi
+     par course. Elle se repondère donc par les courses, comme le fait déjà
+     `cityDistance` dans le bloc des nombres. Les poids restent en unités du
+     binaire : seul leur rapport compte, et l'échelle s'applique après. */
   const n = stepsOf(S.scope);
   const idx = ((step % n) + n) % n;
   const a = SERIES[S.scope][S.measure];
+  if (S.measure === "distance") {
+    const t = SERIES[S.scope].trips;
+    let num = 0, den = 0;
+    for (let z = 0; z < Z; z++) {
+      num += a[z * n + idx] * t[z * n + idx];
+      den += t[z * n + idx];
+    }
+    return den ? num / den : 0;
+  }
+  let s = 0;
   for (let z = 0; z < Z; z++) { s += a[z * n + idx]; }
   return s;
 }
