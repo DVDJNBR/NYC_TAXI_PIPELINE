@@ -45,7 +45,12 @@ PAGE_CONFIG = dict(
 # valeur à `?vue=` et de clé de traduction (`nav.` + la clé). Un lien partagé
 # reste donc valide quelle que soit la langue de celui qui l'ouvre, et le code
 # ne compare jamais du texte affiché.
-PAGE_COCKPIT  = "cockpit"
+# « cockpit » est le nom interne de la vue, pas son intitulé : la valeur
+# d'URL, elle, est lue par un visiteur. D'où `dashboard`, qui dit la même
+# chose que l'onglet. Un lien d'avant le changement, `?vue=cockpit`, n'est
+# plus dans VIEWS : _index le rejette et rend DEFAULT_SECTION, qui est cette
+# vue-ci. L'ancien lien ouvre donc la bonne page.
+PAGE_COCKPIT  = "dashboard"
 PAGE_ABOUT    = "about"
 PAGE_PIPELINE = "pipeline"
 

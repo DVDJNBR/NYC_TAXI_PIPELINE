@@ -38,7 +38,7 @@ STRINGS = {
         "nav.when": "Quand",
         "nav.where": "Où",
         "nav.how": "Comment",
-        "nav.cockpit": "Dashboard",
+        "nav.dashboard": "Dashboard",
         "nav.about": "À propos",
         "nav.pipeline": "Pipeline de données",
 
@@ -129,7 +129,7 @@ STRINGS = {
         "nav.when": "When",
         "nav.where": "Where",
         "nav.how": "How",
-        "nav.cockpit": "Dashboard",
+        "nav.dashboard": "Dashboard",
         "nav.about": "About",
         "nav.pipeline": "Data pipeline",
 
@@ -219,7 +219,7 @@ STRINGS = {
         "nav.when": "Cuándo",
         "nav.where": "Dónde",
         "nav.how": "Cómo",
-        "nav.cockpit": "Dashboard",
+        "nav.dashboard": "Dashboard",
         "nav.about": "Acerca de",
         "nav.pipeline": "Flujo de datos",
 
