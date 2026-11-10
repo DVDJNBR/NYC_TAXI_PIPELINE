@@ -3,13 +3,15 @@
 Ce n'est pas une page de graphiques posés côte à côte : c'est une seule
 machine. Un cycle tourne — la journée, la semaine ou l'année type — et tout
 ce qui est affiché se recompose au même pas. La carte, le ruban, les flux et
-les quatre nombres montrent la même heure de la même journée, sinon ils ne
+les deux cadrans montrent la même heure de la même journée, sinon ils ne
 disent rien.
 
 Trois bandes, et les commandes au milieu :
 
     ┌───────────────┬───────────────────────────────┐
-    │ 4 nombres     │ ruban qui défile              │
+    │ passagers     │                               │
+    ├───────────────┤ ruban qui défile              │
+    │ vitesse       │                               │
     ├───────────────┴───────────────────────────────┤
     │ cycle · mesure · pas courant · lecture        │
     ├───────────────────────────────┬───────────────┤
@@ -43,12 +45,16 @@ import nyc_live
 # Hauteurs des trois bandes, en pixels. Les composants vivent dans des
 # iframes de taille fixe : sans ces valeurs, deux blocs voisins ne s'alignent
 # pas.
-# La bande du haut a grandi deux fois, au temps où elle portait quatre cases
-# sur deux rangs. Elle n'en porte plus que deux, côte à côte sur un seul
-# rang : l'anneau des passagers et le nombre lié au panneau allumé. Sa
-# hauteur est donc désormais celle du ruban d'à côté, qui la partage — c'est
-# lui qui la fixe, pas les cases.
-H_TOP = 236
+# La bande du haut porte l'habitacle : le volant des passagers en haut, le
+# compteur de vitesse et le taximètre en bas. Deux cases empilées et non côte
+# à côte — chacune prend ainsi toute la largeur de la colonne. Sa hauteur est
+# celle du ruban d'à côté, qui la partage : c'est lui qui la fixe, pas les
+# cases.
+# 262 et non 236 : le volant mesure 96 px de jante, et le titre comme le
+# sous-titre en prennent treize chacun. À 236 les deux rangs valaient 114 px
+# et la jante était rognée. Le ruban prend les vingt-six pixels de plus sans
+# rien y perdre — il n'a pas de hauteur propre, il s'étire.
+H_TOP = 262
 H_CONTROLS = 70
 H_BOTTOM = 440
 
@@ -62,17 +68,24 @@ def render():
         )
         return
 
-    # Moitié-moitié, et non deux cinquièmes : l'anneau et sa légende demandent
-    # de la largeur côte à côte, et à deux cinquièmes la légende passait sous
-    # l'anneau. Le ruban, lui, lit ses vingt-quatre barres aussi bien sur la
-    # moitié de la page.
+    # Moitié-moitié, et non deux cinquièmes : les deux dessins portent leur
+    # légende à côté d'eux, et à deux cinquièmes elle passait dessous. Le
+    # ruban, lui, lit ses vingt-quatre barres aussi bien sur la moitié de la
+    # page.
     numbers, ribbon = st.columns([1, 1], gap="medium")
     with numbers:
         nyc_live.kpis(height=H_TOP)
     with ribbon:
         nyc_live.profile(
             height=H_TOP,
-            title="Le volume de la ville, pas par pas",
+            # Ce titre ne vit qu'une image : le composant le réécrit dès
+            # son premier état, avec la mesure allumée. Il reste ici parce
+            # qu'un titre vide fait retirer la barre de titre, et le dessin
+            # monterait alors de huit pixels avant de redescendre.
+            # « Le volume de la ville, pas par pas » décrivait le dessin au
+            # lieu de nommer ce qui est tracé, et « volume » devenait faux
+            # dès qu'on allumait les dollars ou les miles.
+            title="Volume de courses par heure",
             hint="Le présent est sur le trait ; le passé file à gauche.",
         )
 

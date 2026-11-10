@@ -47,9 +47,8 @@ ZONES = ROOT / "data" / "reference" / "taxi_zones.json"
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
 
 # Le nombre de pas par cycle, à tenir d'accord avec STEPS de
-# J_build_cycles.py et CYCLES de nyc_live.py. dow multiplie son rang par
-# vingt-quatre et y ajoute l'heure : sept jours donnent donc 168 pas.
-CYCLES = {"hour": 24, "dow": 168, "month": 12}
+# J_build_cycles.py et CYCLES de nyc_live.py.
+CYCLES = {"hour": 24, "dow": 7, "month": 12}
 
 # Les deux aéroports que la maquette dessine, dans l'ordre où le composant
 # les reçoit. Newark n'y est pas : les taxis jaunes n'y chargent pas, et son

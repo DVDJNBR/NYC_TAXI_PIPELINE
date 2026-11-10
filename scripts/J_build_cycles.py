@@ -4,15 +4,15 @@ Le cockpit ne rejoue pas une chronologie, il tourne en boucle sur un cycle.
 Trois cycles, exclusifs l'un de l'autre :
 
     hour     24 pas, minuit -> minuit, tous jours confondus
-    dow     168 pas, lundi 0 h -> dimanche 23 h
+    dow       7 pas, lundi -> dimanche, heures confondues
     month    12 pas, janvier -> décembre, heures confondues
 
-Seule la semaine porte l'heure dans son pas. Un pas d'une journée entière y
-écrasait le cycle jour/nuit, alors que ses sept journées ont des formes
-vraiment différentes. L'année, elle, garde un pas par mois : ses douze
-profils de 24 h ne s'écartent que de 1,5 à 4,4 % de leur forme moyenne, donc
-l'heure n'y aurait répété douze fois la même vague. Voir le commentaire de
-STEPS pour les mesures.
+Aucun cycle ne porte l'heure dans son pas. La semaine l'a portée un temps —
+168 pas — pour garder le cycle jour/nuit visible d'un jour à l'autre, mais le
+cockpit avançait alors d'un pas toutes les 243 ms et ses instruments ne se
+lisaient plus. Un pas de « mardi » moyenne donc ses vingt-quatre heures, et
+le cycle jour/nuit se lit dans le cycle de la journée, qui est fait pour lui.
+Voir le commentaire de STEPS.
 
 Toutes les valeurs sont ramenées à une **heure moyenne** du pas, jamais à un
 total brut : le dénominateur est le nombre d'occurrences du pas fois le
@@ -24,9 +24,9 @@ réellement observés pour chaque pas, lu dans daily.parquet.
 
 Trois tables en sortie, toutes lues par les composants du cockpit :
 
-    data/aggregates/zone_cycle.parquet   zone x 204 pas x 15 colonnes
-    data/aggregates/od_cycle.parquet     flux entre secteurs x 204 pas
-    data/aggregates/dur_cycle.parquet    204 pas x 31 bacs de duree
+    data/aggregates/zone_cycle.parquet   zone x 43 pas x 15 colonnes
+    data/aggregates/od_cycle.parquet     flux entre secteurs x 43 pas
+    data/aggregates/dur_cycle.parquet    43 pas x 31 bacs de duree
 
 La distance est stockée en somme et non en moyenne : une moyenne de moyennes
 donnerait le même poids à une zone de trois courses et à Midtown. La division
@@ -71,26 +71,26 @@ DUR_BINS, DUR_WIDTH = 31, 120
 # dimanche ; le décalage met le lundi en tête, comme partout ailleurs dans
 # l'application.
 #
-# dow multiplie son rang par 24 et y ajoute l'heure. Sans cela un pas
-# moyennait les vingt-quatre heures d'une journée et le cycle jour/nuit
-# disparaissait de la semaine.
-# Mesuré sur les trente-sept zones qui dépassent cinquante courses par pas :
+# dow a multiplié son rang par 24 et ajouté l'heure pendant un temps, pour
+# tenir le cycle jour/nuit dans la semaine. Ce que cela gagnait est réel et
+# mesuré : sur les trente-sept zones qui dépassent cinquante courses par pas,
 # le volume varie d'un facteur 24,4 en médiane entre l'heure de pointe et
-# l'heure creuse de la zone, et jusqu'à 171,2 pour la zone 138 — une course
-# à 4 h contre deux cent soixante-sept à 14 h. La zone 48, elle, ne varie
-# que d'un facteur 6,4. Leurs moyennes journalières sont voisines, 141 et
-# 119 : la carte les dessinait donc comme des jumelles, et montrait un état
-# de ville qui n'existe à aucune heure.
+# l'heure creuse de la zone, et jusqu'à 171,2 pour la zone 138. Un pas
+# journalier dessine donc deux zones de moyennes voisines comme des jumelles.
+#
+# Ce que cela coûtait est tout aussi réel : 168 pas font un cockpit qui
+# change d'état quatre fois par seconde, et aucun de ses instruments ne se
+# lit à ce rythme. Le cycle de la journée porte l'heure, et c'est là qu'on
+# regarde l'heure ; la semaine compare des journées entières.
 STEPS = {
     "hour": "hour(tpep_pickup_datetime)",
-    "dow": "((dayofweek(tpep_pickup_datetime) + 6) % 7) * 24 "
-           "+ hour(tpep_pickup_datetime)",
+    "dow": "((dayofweek(tpep_pickup_datetime) + 6) % 7)",
     "month": "month(tpep_pickup_datetime) - 1",
 }
 
-# Combien d'heures un pas couvre. Un pas d'heure en couvre une, un pas de dow
-# aussi — « mardi 14 h » — mais un pas de month couvre le mois entier, toutes
-# heures confondues.
+# Combien d'heures un pas couvre. Un pas d'heure en couvre une ; un pas de
+# dow couvre une journée et un pas de month un mois entier, toutes heures
+# confondues.
 #
 # Ce diviseur met les trois cycles dans la même unité : la course par heure.
 # Sans lui, une colonne du cycle de l'année valait vingt-quatre fois la même
@@ -98,7 +98,7 @@ STEPS = {
 # quatre heures par jour. La carte, qui empile un bloc par vingt courses à
 # l'heure, montait alors à 304 blocs sur l'année contre 33 sur la semaine, et
 # le ruban annonçait 127 000 courses là où la ville en fait 5 300.
-HOURS = {"hour": 1, "dow": 1, "month": 24}
+HOURS = {"hour": 1, "dow": 24, "month": 24}
 
 
 def denominators() -> pd.DataFrame:
@@ -107,15 +107,9 @@ def denominators() -> pd.DataFrame:
     Lu dans daily.parquet plutôt que dans les Parquet bruts : la liste des
     journées y est déjà, et la relire coûterait un scan complet de plus.
 
-    Les pas de dow portent l'heure, mais le dénominateur ne la regarde pas :
-    les vingt-quatre heures d'un même lundi partagent les quatre-vingt-onze
-    lundis de la période. Le rapport reste donc « courses à 14 h un lundi
-    moyen ».
-
-    Deux heures par an échappent à cette règle, aux changements d'heure : le
-    2 h du dimanche de mars n'existe pas, et celui d'octobre compte double.
-    Sur quatre-vingt-onze dimanches, ces deux pas sont faux de 2 % environ.
-    Corriger coûterait un calendrier de fuseau pour deux cases sur 204.
+    Un pas de dow compte les journées de son rang — les quatre-vingt-onze
+    lundis de la période — et HOURS le divise ensuite par vingt-quatre. Le
+    rapport est donc « courses par heure d'un lundi moyen ».
     """
     if not DAILY.exists():
         sys.exit("data/aggregates/daily.parquet manquant : lancer d'abord G.")
@@ -126,8 +120,7 @@ def denominators() -> pd.DataFrame:
     rows = [("hour", h, len(dates)) for h in range(24)]
     # dayofweek de pandas met déjà le lundi à 0, comme l'expression SQL.
     dow = dates.dt.dayofweek.value_counts()
-    rows += [("dow", int(k) * 24 + h, int(v))
-             for k, v in dow.items() for h in range(24)]
+    rows += [("dow", int(k), int(v)) for k, v in dow.items()]
     month = dates.dt.month.value_counts()
     rows += [("month", int(k) - 1, int(v)) for k, v in month.items()]
     return pd.DataFrame(rows, columns=["SCOPE", "STEP", "DAYS"])

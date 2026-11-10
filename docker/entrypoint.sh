@@ -33,11 +33,11 @@ done
 # version antérieure existe, donc passait la garde, et nyc_live._city()
 # s'arrêtait net au premier rendu. Le schéma se lit sans charger les données.
 #
-# Elle compte aussi les pas du cycle dow, qui sont passés de 7 à 168 en
-# version 11 : les pas portent désormais l'heure. Une table d'avant a les
-# bonnes colonnes et le mauvais nombre de pas — elle passait donc la garde
-# du schéma, et la carte montrait une semaine de moyennes journalières, où
-# le cycle jour/nuit est écrasé. Seules deux colonnes sont lues.
+# Elle compte aussi les pas du cycle dow. Ils sont passés de 7 à 168 en
+# version 11, puis sont revenus à 7 en version 17 : un pas de 243 ms ne se
+# lisait plus. Une table de la version 11 a les bonnes colonnes et le mauvais
+# nombre de pas — elle passerait donc la garde du schéma, et le cockpit
+# lirait 168 pas là où il en attend sept. Seules deux colonnes sont lues.
 #
 # dur_cycle.parquet est la troisième table, écrite par le même script depuis
 # la version 10 : la case des durées en lit la distribution complète.
@@ -58,7 +58,7 @@ if not need <= cols:
     sys.exit(1)
 t = pq.read_table(P, columns=['SCOPE', 'STEP'])
 steps = pc.unique(t['STEP'].filter(pc.equal(t['SCOPE'], 'dow')))
-sys.exit(0 if len(steps) == 168 else 1)
+sys.exit(0 if len(steps) == 7 else 1)
 " 2>/dev/null; then
     echo "zone_cycle.parquet est d'une version antérieure — reconstruction."
     needs_cycles=1
