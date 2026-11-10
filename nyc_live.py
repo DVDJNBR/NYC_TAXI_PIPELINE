@@ -4878,10 +4878,14 @@ const NIGHT = CFG.mode === "dark";
 
    Le vecteur monte vers la droite : la lumière vient de la gauche dans tout
    le tableau de bord, donc la joue visible est celle de l'ombre et le toit
-   prend la lumière. Neuf pixels de côté sur une barre de vingt-six, c'est
-   le tiers — assez pour que le volume se voie, assez peu pour que la file
-   reste une file et non un empilement. */
-const DEPTH_X = 9, DEPTH_Y = -5;
+   prend la lumière.
+
+   Cinq pixels, et non neuf. La profondeur ne se prend pas en plus de la
+   barre, elle se prend dedans : la face est rétrécie d'autant, donc le
+   prisme occupe exactement la place que le rectangle occupait avant. À neuf
+   pixels ajoutés à une face de vingt-six, chaque barre grossissait d'un
+   tiers et la file se resserrait — ce n'est pas le même ruban. */
+const DEPTH_X = 5, DEPTH_Y = -3;
 function quad(p) {
   ctx.beginPath();
   ctx.moveTo(p[0], p[1]);
@@ -5093,7 +5097,10 @@ function draw() {
   const t = phase();
   const { span, behind: BEHIND, ahead: AHEAD } = window_();
   const pitch = w / span;
-  const bw = Math.min(pitch * 0.58, 26);
+  /* La profondeur est retirée de la face : face plus joue font la largeur
+     qu'avait le rectangle plat, donc l'encombrement d'une barre n'a pas
+     changé et l'espacement de la file non plus. */
+  const bw = Math.min(pitch * 0.58, 26) - DEPTH_X;
   /* `top` garde au-dessus des barres de quoi écrire la valeur du pas
      courant, et laisse passer le titre posé en surimpression : sans cette
      réserve, le nombre sort du canvas ou se superpose au titre. */
