@@ -25,7 +25,9 @@ réellement observés pour chaque pas, lu dans daily.parquet.
 Trois tables en sortie, toutes lues par les composants du cockpit :
 
     data/aggregates/zone_cycle.parquet   zone x 43 pas x 15 colonnes
-    data/aggregates/od_cycle.parquet     flux entre secteurs x 43 pas
+    data/aggregates/od_cycle.parquet     flux entre secteurs x 43 pas,
+                                         avec le temps de trajet dans
+                                         chaque sens
     data/aggregates/dur_cycle.parquet    43 pas x 31 bacs de duree
 
 La distance est stockée en somme et non en moyenne : une moyenne de moyennes
@@ -194,6 +196,20 @@ def od_cycle(con) -> pd.DataFrame:
     Les trois cycles sortent d'une seule lecture : la jointure sur le
     référentiel coûte plus cher que le regroupement, autant ne la faire
     qu'une fois et laisser DuckDB produire les trois agrégats ensemble.
+
+    Le couple est ordonné : la ligne Midtown -> Airports et la ligne
+    Airports -> Midtown sont deux lignes distinctes, et leurs durées n'ont
+    aucune raison d'être les mêmes — on ne met pas le même temps à sortir de
+    Manhattan qu'à y entrer. Les deux sens sont donc tous les deux dans la
+    table, chacun avec son temps.
+
+    Deux temps par couple, et non un seul. La moyenne pondérée suit la
+    somme des minutes sur la somme des courses : c'est le temps total passé
+    sur la liaison, et c'est lui qui bouge avec le trafic. La médiane, elle,
+    tient debout quand une course d'une heure et demie traîne dans le lot —
+    et il y en a, la queue de la distribution des durées est longue. Les
+    deux sont stockées ; le composant choisira, et l'écart entre elles dit
+    à lui seul si le pas est régulier ou accidenté.
     """
     t0 = time.time()
     # La correspondance zone -> secteur est calculée en Python, depuis la
@@ -209,7 +225,13 @@ def od_cycle(con) -> pd.DataFrame:
         selects.append(f"""
             SELECT '{scope}' AS SCOPE, {expr} AS STEP,
                    pu.Area AS PU_AREA, dz.Area AS DO_AREA,
-                   count(*) AS TOTAL_TRIPS, sum(total_amount) AS TOTAL_REVENUE
+                   count(*) AS TOTAL_TRIPS, sum(total_amount) AS TOTAL_REVENUE,
+                   sum(trip_distance) AS SUM_DISTANCE,
+                   sum(date_diff('second', tpep_pickup_datetime,
+                                 tpep_dropoff_datetime)) / 60.0 AS SUM_MINUTES,
+                   median(date_diff('second', tpep_pickup_datetime,
+                                    tpep_dropoff_datetime)) / 60.0
+                       AS MED_MINUTES
             FROM read_parquet('{RAW}', union_by_name = true) t
             JOIN sectors pu ON pu.LocationID = t.PULocationID
             JOIN sectors dz ON dz.LocationID = t.DOLocationID
@@ -290,10 +312,17 @@ def main() -> None:
 
     od = od_cycle(con).merge(days, on=["SCOPE", "STEP"])
     od["HOURS"] = od["SCOPE"].map(HOURS)
+    # Les deux moyennes se prennent sur les totaux bruts, avant toute
+    # normalisation : ce sont des rapports de deux sommes du même pas, donc
+    # un dénominateur commun s'y annulerait. Elles sortent en minutes et en
+    # miles par course, pas « par heure moyenne » — une durée de trajet
+    # n'est pas une quantité qu'on cumule.
+    od["AVG_MINUTES"] = od["SUM_MINUTES"] / od["TOTAL_TRIPS"]
+    od["AVG_DISTANCE"] = od["SUM_DISTANCE"] / od["TOTAL_TRIPS"]
     per_hour = od["DAYS"] * od["HOURS"]
     od["TOTAL_TRIPS"] = od["TOTAL_TRIPS"] / per_hour
     od["TOTAL_REVENUE"] = od["TOTAL_REVENUE"] / per_hour
-    od = od.drop(columns=["DAYS", "HOURS"])
+    od = od.drop(columns=["SUM_MINUTES", "SUM_DISTANCE", "DAYS", "HOURS"])
     od.to_parquet(OUT / "od_cycle.parquet", index=False)
 
     for name in ("zone_cycle", "od_cycle", "dur_cycle"):
