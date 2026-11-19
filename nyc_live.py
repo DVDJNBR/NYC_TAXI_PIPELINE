@@ -4845,36 +4845,13 @@ function hash(a, b, c) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-/* Deux peaux de barre, une par mesure. L'objet dit la mesure avant que le
-   titre soit lu : une tour pour les courses, une liasse pour les revenus.
-
-   Règle qui ne se négocie pas : le sommet de la silhouette reste à `bh`
-   dans les deux cas. Les retraits d'une tour se prennent sur la largeur, et
-   le billet du haut d'une liasse se cale sur le sommet et non sur le socle.
-   Une barre qui mentirait d'un pixel sur sa hauteur ne serait plus une
-   barre, et le ruban se lit en hauteur. */
-const SETBACK_H = 46, SPIRE_H = 112;
-
-/* Le pas d'étage, le même pour toutes les tours du ruban, et la lumière.
-
-   La lumière vient de la gauche, comme pour la jante du volant et le relief
-   des panneaux : une seule source dans tout le tableau de bord, sinon chaque
-   objet est éclairé par son propre soleil. La face droite est donc dans
-   l'ombre et le toit prend la lumière.
-
-   Les deux voiles sont du noir et du blanc transparents et non des couleurs
-   calculées : une barre peut être à l'encre ou en gris de fond, et un voile
-   transparent marche sur les deux sans qu'il faille mélanger des teintes
-   dans le canvas. */
-const FLOOR = 5;
 const NIGHT = CFG.mode === "dark";
 
-/* La profondeur. Le ruban passe de la face plate au volume : chaque barre
-   gagne une joue à droite et un toit au-dessus, décalés d'un vecteur
-   constant. Constant est le mot — c'est une axonométrie et non une
-   perspective, donc deux barres de même hauteur font la même hauteur à
-   l'écran où qu'elles soient dans la file, et la hauteur reste la mesure.
-   Un point de fuite, lui, aurait rétréci les barres du fond.
+/* La profondeur. Chaque barre gagne une joue à droite et un toit au-dessus,
+   décalés d'un vecteur constant. Constant est le mot — c'est une axonométrie
+   et non une perspective, donc deux barres de même hauteur font la même
+   hauteur à l'écran où qu'elles soient dans la file, et la hauteur reste la
+   mesure. Un point de fuite, lui, aurait rétréci les barres du fond.
 
    Le vecteur monte vers la droite : la lumière vient de la gauche dans tout
    le tableau de bord, donc la joue visible est celle de l'ombre et le toit
@@ -4886,6 +4863,7 @@ const NIGHT = CFG.mode === "dark";
    pixels ajoutés à une face de vingt-six, chaque barre grossissait d'un
    tiers et la file se resserrait — ce n'est pas le même ruban. */
 const DEPTH_X = 5, DEPTH_Y = -3;
+
 function quad(p) {
   ctx.beginPath();
   ctx.moveTo(p[0], p[1]);
@@ -4893,124 +4871,344 @@ function quad(p) {
   ctx.closePath();
   ctx.fill();
 }
-const CORNICE = NIGHT ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.4)";
-/* La masse est presque opaque. À huit dixièmes, l'horizon se lisait au
-   travers des tours et les deux plans se mélangeaient : une tour qui laisse
-   voir ce qui est derrière elle n'est pas une tour. Un vingtième suffit à
-   l'asseoir dans la scène. */
-const MASS_A = 0.95;
 
-/* Le gris des tours est bleuté : c'est la couleur d'un volume de béton vu à
-   distance, où l'air ajoute du bleu, et c'est aussi ce qui le distingue du
-   gris neutre des filets et du texte. Le pas courant est plus sombre et plus
-   dense, le reste recule.
+/* La peau d'une barre : un immeuble, et le ruban entier une rue.
 
-   Le vitrage est bleu clair en thème clair — du verre réfléchissant le ciel —
-   et jaune franc en thème sombre, où ce sont des fenêtres allumées dans la
-   nuit. C'est la même façade à deux heures du jour. */
-const MASS_HERE = NIGHT ? "#e4ebf7" : "#39465c";
-const MASS_FAR = NIGHT ? "#5f6a7d" : "#95a1b5";
-const GLASS = NIGHT ? "#ffd84d" : "#8fb6e3";
+   Une seule peau pour les deux mesures. La liasse de billets qui servait
+   aux revenus a été abandonnée : l'objet n'a pas à dire la mesure, le titre
+   et le nombre du pas courant le disent déjà, et deux peaux faisaient deux
+   dessins à tenir pour une seule série.
 
-/* La tour : un corps jusqu'à l'épaule, un étage plus étroit au-dessus, une
-   flèche sur les plus hautes, et des fenêtres sur le corps. C'est la
-   silhouette à retraits que le zonage de 1916 a imposée à Manhattan — la
-   raison pour laquelle les tours de New York sont des escaliers. */
-function tower(x0, base, bw, bh, idx, col, lit) {
-  const shoulder = bh > SETBACK_H ? bh * 0.72 : bh;
-  /* Un bloc de la tour : la masse, sa face d'ombre à droite, sa corniche en
-     haut. Trois passes sur le même rectangle, et c'est tout le volume. */
-  const a = ctx.globalAlpha;
-  /* Un bloc de la tour : la masse, le modelé en travers, la corniche en
-     haut.
+   Règle qui ne se négocie pas : le sommet de la silhouette reste à `bh`.
+   Les retraits, les édicules, les flèches et les corniches se prennent sur
+   la largeur ; les halos sont coupés au sommet du volume. Une barre qui
+   mentirait d'un pixel sur sa hauteur ne serait plus une barre, et le ruban
+   se lit en hauteur. */
 
-     Le modelé est un dégradé et non une face d'ombre à bord franc. Le bord
-     franc faisait une arête à soixante-douze pour cent de la largeur, donc
-     un pli de papier plié, et tout le ruban prenait l'air d'un dessin à la
-     case. Un dégradé clair à gauche, neutre au milieu, sombre à droite est
-     ce que fait la lumière sur une masse, et il n'a pas de bord. */
-  const block = (x, y, w, hh) => {
-    /* La joue et le toit passent avant la face : la face est le plan le
-       plus proche, elle recouvre ce qui dépasse. */
-    const dx = DEPTH_X, dy = DEPTH_Y;
-    const joue = [x + w, y, x + w + dx, y + dy,
-                  x + w + dx, y + dy + hh, x + w, y + hh];
-    const toit = [x, y, x + dx, y + dy, x + w + dx, y + dy, x + w, y];
-    ctx.globalAlpha = a * MASS_A;
-    ctx.fillStyle = col;
-    quad(joue);
-    ctx.globalAlpha = a;
-    ctx.fillStyle = "rgba(0,0,0," + (NIGHT ? 0.34 : 0.2) + ")";
-    quad(joue);
-    ctx.globalAlpha = a * MASS_A;
-    ctx.fillStyle = col;
-    quad(toit);
-    ctx.globalAlpha = a;
-    ctx.fillStyle = "rgba(255,255,255," + (NIGHT ? 0.1 : 0.22) + ")";
-    quad(toit);
-    ctx.globalAlpha = a * MASS_A;
-    ctx.fillStyle = col;
-    ctx.fillRect(x, y, w, hh);
-    ctx.globalAlpha = a;
-    const g = ctx.createLinearGradient(x, 0, x + w, 0);
-    g.addColorStop(0, "rgba(255,255,255," + (NIGHT ? 0.07 : 0.14) + ")");
-    g.addColorStop(0.52, "rgba(0,0,0,0)");
-    g.addColorStop(1, "rgba(0,0,0," + (NIGHT ? 0.34 : 0.2) + ")");
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y, w, hh);
-    if (hh > 4) {
-      ctx.fillStyle = CORNICE;
-      ctx.fillRect(x, y, w, 1);
-    }
-  };
-  block(x0, base - shoulder, bw, shoulder);
-  if (bh > SETBACK_H) {
-    const w2 = Math.max(3, bw * 0.62);
-    const h2 = bh > SPIRE_H ? bh * 0.92 : bh;
-    block(x0 + (bw - w2) / 2, base - h2, w2, h2 - shoulder);
-    if (bh > SPIRE_H) {
-      const w3 = Math.max(2, bw * 0.3);
-      block(x0 + (bw - w3) / 2, base - bh, w3, bh - h2);
+/* Une seule famille de couleur, quatre valeurs. Un histogramme est une
+   série : ses barres doivent se lire comme un même objet mesuré vingt-quatre
+   fois, et non comme vingt-quatre immeubles d'un quartier. La pierre, la
+   brique et le sable mettaient quatre teintes franches dans la file, et la
+   file cessait d'être une série.
+
+   Reste le bleu, du plus clair au plus profond : quatre valeurs dans un
+   intervalle de teinte de douze degrés, à saturation basse. La variation se
+   fait en clarté, où l'œil la lit comme de la distance et non comme une
+   catégorie. */
+const MATIERES = {
+  light: [[206, 15, 67], [210, 14, 59], [214, 15, 51], [218, 16, 44]],
+  dark: [[206, 18, 37], [210, 19, 33], [214, 20, 29], [218, 21, 26]]
+};
+
+function hsl(h, s, l, a) {
+  const H = ((h % 360) + 360) % 360;
+  const S2 = Math.max(0, Math.min(100, s));
+  const L2 = Math.max(0, Math.min(100, l));
+  return "hsla(" + H.toFixed(1) + "," + S2.toFixed(1) + "%,"
+    + L2.toFixed(1) + "%," + (a === undefined ? 1 : a) + ")";
+}
+
+/* Les lampes de la ville, en teinte/saturation/clarté. Le fond est le blanc
+   chaud des bureaux ; le blanc froid est le tube fluorescent ; le vert est
+   celui des lampes à vapeur de mercure qui éclairent les terrasses et les
+   paliers ; le rouge est le feu d'obstacle du sommet. */
+const CHAUD = [44, 40, 87], FROID = [202, 20, 91],
+      VERT = [146, 46, 66], ROUGE = [6, 74, 66];
+function teinte(c, al) { return hsl(c[0], c[1], c[2], al); }
+function rnd(idx, k) { return (hash(idx, k, 17) % 1000) / 1000; }
+
+/* Les lumières ne suivent pas l'effacement de la masse. Une barre lointaine
+   recule à 0,62 d'opacité, et sous ce voile ses fenêtres tombaient à rien ;
+   or une ville de nuit perd ses volumes dans la distance, pas ses lumières —
+   ce sont elles qu'on voit en dernier. Le mur recule donc à `a`, les lumières
+   restent à 1. */
+function aLum() { return 1; }
+
+/* Le halo d'une lampe. Il est coupé au-dessus de `yMin` : une lueur qui
+   monterait plus haut que le sommet ferait mentir la hauteur, qui est la
+   valeur. */
+function halo(cx, cy, c, alpha, r, yMin) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, teinte(c, alpha));
+  g.addColorStop(1, teinte(c, 0));
+  const y0 = (yMin === undefined) ? cy - r : Math.max(yMin, cy - r);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r, y0, r * 2, cy + r - y0);
+}
+
+/* Une lampe : son halo, puis son point. C'est le halo qui fait la brillance —
+   un point seul reste un pixel, quelle que soit sa clarté. */
+function lampe(cx, cy, c, intensite, a, r, yMin) {
+  halo(cx, cy, c, Math.min(0.7, intensite * 0.6) * a, r, yMin);
+  ctx.globalAlpha = Math.min(1, a * intensite);
+  ctx.fillStyle = teinte(c);
+  ctx.fillRect(cx - 0.65, cy - 0.65, 1.3, 1.3);
+}
+
+/* Les lampes de toiture. Un palier étroit, un édicule, une flèche : ces
+   volumes sont trop minces pour porter des fenêtres, et c'est justement là
+   que la ville pose ses lampes — projecteurs de couronnement, balisage de
+   terrasse. Le vert y revient souvent : c'est la vapeur de mercure. */
+function toitures(x, y, w, idx, k, a) {
+  const n = w < 5 ? 1 : (w < 9 ? 2 : 3);
+  for (let i = 0; i < n; i++) {
+    if (hash(idx, k * 13 + i, 51) % 100 > 64) { continue; }
+    const px = x + (n === 1 ? w / 2 : 1 + i * (w - 2) / (n - 1));
+    const c = (hash(idx, k * 13 + i, 53) % 100 < 34) ? VERT : CHAUD;
+    const inten = 0.55 + (hash(idx, i, 52) % 45) / 100;
+    lampe(px, y + 1.4, c, inten, aLum(a), 2.8, y);
+  }
+}
+
+/* La joue est dans l'ombre, mais une façade latérale n'est pas éteinte :
+   elle porte les mêmes fenêtres, vues de biais. Deux colonnes suffisent à
+   cette profondeur, et elles sont deux fois plus faibles que la face —
+   différentes, mais visibles. Les points suivent le vecteur de profondeur,
+   donc ils montent avec la joue. */
+function jouePoints(x, y, w, hh, idx, a, seuil) {
+  if (DEPTH_X < 3) { return; }
+  const pasV = 2.8, aL = aLum(a);
+  const lignes = Math.max(1, Math.floor((hh - 3.5) / pasV));
+  for (let r = 0; r < lignes; r++) {
+    for (let c = 0; c < 2; c++) {
+      const t = (c === 0) ? 0.3 : 0.72;
+      if (hash(idx, r * 11 + c, 61) % 100 > seuil * 0.62) { continue; }
+      const f = hash(idx, r * 11 + c, 62) % 100;
+      ctx.globalAlpha = aL * (0.18 + (f % 32) / 100);
+      ctx.fillStyle = teinte((f % 9 === 0) ? FROID : CHAUD);
+      ctx.fillRect(x + w + t * DEPTH_X, y + 2.6 + r * pasV + t * DEPTH_Y, 1, 1);
     }
   }
-  /* Le vitrage ne tient pas sous onze pixels de large : il y devient un
-     bruit qui salit la couleur de la barre. */
-  if (bw < 11 || shoulder < 14) { return; }
-  /* Le vitrage est en bandeaux d'étage, et non en petits carrés.
+}
 
-     Les carrés de deux pixels et demi sur une grille de cinq étaient de la
-     mosaïque : à cette taille l'oeil ne voit pas des fenêtres, il voit des
-     pixels, et une tour de bureaux n'est de toute façon pas un damier — elle
-     est une pile de bandeaux vitrés que les trumeaux coupent à peine.
+/* La matière d'une barre : tirée à l'indice, puis nuancée d'immeuble en
+   immeuble. Deux voisins de même matière ne sont donc pas de la même
+   couleur, ce qui est le cas dans une rue. */
+function matiere(idx, here) {
+  const tbl = MATIERES[NIGHT ? "dark" : "light"];
+  const b = tbl[hash(idx, 3, 5) % tbl.length];
+  const h = b[0] + (rnd(idx, 11) - 0.5) * 6;
+  let s = b[1] + (rnd(idx, 12) - 0.5) * 4;
+  let l = b[2] + (rnd(idx, 13) - 0.5) * 6;
+  /* Le pas courant garde le relief de sa matière : il ne change pas de
+     couleur, il change de place dans l'échelle des clartés. */
+  if (here) { l = NIGHT ? l + 34 : l - 24; s = s + (NIGHT ? -2 : 6); }
+  return { h: h, s: s, l: l };
+}
 
-     Trois passes par étage : le bandeau de verre, très pâle, sur toute la
-     largeur ; puis une portion allumée, de largeur et de place tirées ; puis
-     rien du tout un étage sur deux. Ce sont les portions qui font les
-     bureaux encore occupés, et leur irrégularité qui fait la façade.
+/* Les trois faces d'un même volume. Le toit regarde le ciel : il monte en
+   clarté et refroidit. La joue est dans l'ombre : elle descend et se
+   réchauffe à peine, comme une paroi qui ne reçoit que la lumière renvoyée
+   par la rue. */
+function faces(m) {
+  return {
+    face: m,
+    toit: { h: m.h - 6, s: m.s * 0.92, l: m.l + (NIGHT ? 9 : 12) },
+    joue: { h: m.h + 4, s: m.s * 1.06, l: m.l - (NIGHT ? 7 : 13) }
+  };
+}
 
-     Les étages sont comptés depuis le socle et non depuis le sommet de la
-     barre. Deux tours voisines ont alors leurs bandeaux sur les mêmes
-     lignes, comme deux immeubles d'une même rue ; comptés depuis le sommet,
-     chaque tour avait sa propre grille et la file lisait comme un bruit.
+/* Un volume : joue et toit d'abord, face ensuite — la face est le plan le
+   plus proche, elle recouvre ce qui dépasse. */
+function villeBlock(x, y, w, hh, m, a) {
+  const F = faces(m);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = hsl(F.joue.h, F.joue.s, F.joue.l);
+  quad([x + w, y, x + w + DEPTH_X, y + DEPTH_Y,
+        x + w + DEPTH_X, y + DEPTH_Y + hh, x + w, y + hh]);
+  ctx.fillStyle = hsl(F.toit.h, F.toit.s, F.toit.l);
+  quad([x, y, x + DEPTH_X, y + DEPTH_Y,
+        x + w + DEPTH_X, y + DEPTH_Y, x + w, y]);
+  /* La face n'est pas un aplat : un dégradé vertical très court, clair en
+     haut, du ciel qui tombe sur la paroi. Trois points de clarté, pas un
+     voile blanc. */
+  const g = ctx.createLinearGradient(0, y, 0, y + hh);
+  g.addColorStop(0, hsl(m.h, m.s, m.l + 3.5));
+  g.addColorStop(1, hsl(m.h, m.s, m.l - 2.5));
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, hh);
+  /* L'arête du coin, dans la couleur de l'ombre et non en noir. */
+  if (hh > 3) {
+    ctx.fillStyle = hsl(F.joue.h, F.joue.s, F.joue.l - 4, 0.7);
+    ctx.fillRect(x + w - 1, y, 1, hh);
+  }
+  /* Le couronnement : la matière éclaircie, pas du blanc. */
+  if (hh > 4) {
+    ctx.fillStyle = hsl(m.h, m.s * 0.9, m.l + (NIGHT ? 14 : 16), 0.85);
+    ctx.fillRect(x, y, w, 1);
+  }
+}
 
-     Le rang de l'étage entre dans le tirage, donc un étage allumé reste
-     allumé quand la barre monte : la tour ne se rallume pas à chaque pas. */
-  const inset = 2.5, ww = bw - inset * 2, gh = 1.4;
-  ctx.fillStyle = lit;
-  for (let y = base - FLOOR - 1; y > base - shoulder + 3; y -= FLOOR) {
-    const r = Math.round((base - y) / FLOOR);
-    ctx.globalAlpha = a * (NIGHT ? 0.24 : 0.16);
-    ctx.fillRect(x0 + inset, y, ww, gh);
-    if (hash(idx, r, 1) % 100 < 46) {
-      const w2 = ww * (0.22 + (hash(idx, r, 2) % 58) / 100);
-      const ox = x0 + inset + (ww - w2) * (hash(idx, r, 3) % 100) / 100;
-      /* La nuit, une fenêtre allumée est allumée : elle ne se nuance pas.
-         Le jour, un reflet de ciel n'a pas de raison d'être à pleine force,
-         et c'est là que la nuance sert. */
-      ctx.globalAlpha = a * (NIGHT ? 0.76 + (hash(idx, r, 4) % 24) / 100
-                                   : 0.46 + (hash(idx, r, 4) % 44) / 100);
-      ctx.fillRect(ox, y, w2, gh);
+/* Les travées. Un immeuble est découpé en bandes verticales par des meneaux
+   d'un pixel ; c'est la travée, et non le carré de fenêtre, qui est l'unité
+   de la façade. La nuit, la façade devient un semis de points ; le jour,
+   elle ne porte qu'un reflet de ciel. */
+function travees(x, y, w, hh, idx, m, a) {
+  if (w < 9 || hh < 12) { return; }
+  const n = Math.max(2, Math.round(w / 5.2));
+  const pad = 1.6;
+  const inner = w - pad * 2;
+  const bwT = inner / n;
+  let k;
+  /* Les meneaux, à peine marqués : ils donnent le rythme, pas le dessin. De
+     jour seulement — la nuit, une façade n'a plus de meneaux, elle n'a que
+     ses fenêtres allumées. */
+  if (!NIGHT) {
+    ctx.globalAlpha = a * 0.4;
+    ctx.fillStyle = hsl(m.h, m.s, m.l - 8, 0.42);
+    for (k = 1; k < n; k++) {
+      ctx.fillRect(x + pad + k * bwT - 0.5, y + 2, 0.8, hh - 3);
     }
+  }
+  if (NIGHT) {
+    /* La nuit, une façade de Manhattan est un nuage de points : beaucoup de
+       petites lumières, la plupart faibles, quelques-unes franches. Les
+       grandes travées allumées d'un bloc étaient une invention — une photo
+       de nuit n'en montre pas.
+
+       La cellule fait 1,3 sur 1,1 pixel sur une trame de 2,6 sur 2,8 : assez
+       petite pour que l'œil voie un semis et non une grille.
+
+       Cinq régimes, tirés par immeuble, qui font les motifs : la tour de
+       bureaux presque pleine, celle qui s'est vidée, celle qui n'éclaire que
+       des étages entiers — les plateaux encore occupés —, celle dont seul le
+       noyau central reste allumé autour des ascenseurs, et la tour
+       entièrement allumée, qu'il y a toujours dans une skyline et qui donne
+       l'échelle des autres.
+
+       La lumière est pâle et non ambre : un blanc chaud à 40 de saturation,
+       et un blanc froid de tube fluorescent une fois sur sept. L'orange
+       saturé d'une photo surexposée n'est pas ce qu'on voit à l'œil. */
+    const pasH = 2.6, pasV = 2.8;
+    const cols = Math.max(1, Math.floor(inner / pasH));
+    const lignes = Math.max(1, Math.floor((hh - 3.5) / pasV));
+    const regime = hash(idx, 41, 7) % 5;
+    const seuil = [93, 68, 30, 54, 36][regime];
+    const aL = aLum(a);
+    const noyauL = Math.max(0.6, cols / 4);
+    /* Une façade sur cinq passe au vert sur ses derniers étages : la vapeur
+       de mercure des terrasses et des paliers. */
+    const vert = hash(idx, 53, 19) % 100 < 22;
+    for (let r2 = 0; r2 < lignes; r2++) {
+      /* Le régime des plateaux : un étage sur deux reste noir, et c'est tout
+         l'étage — ce sont des bureaux, pas des logements. */
+      if (regime === 3 && hash(idx, r2, 21) % 100 > 55) { continue; }
+      for (k = 0; k < cols; k++) {
+        const noyau = regime === 4 && Math.abs(k - (cols - 1) / 2) <= noyauL;
+        const tir = hash(idx, r2 * 37 + k, 23) % 100;
+        if (!(tir < seuil || (noyau && tir < 86))) { continue; }
+        const fort = hash(idx, r2 * 37 + k, 29) % 100;
+        const vif = fort < 13;
+        let al = vif ? 1 : 0.26 + (fort % 44) / 100;
+        let c2 = (fort % 7 === 0) ? FROID : CHAUD;
+        if (vert && r2 >= lignes - 2) { c2 = VERT; al = Math.max(al, 0.75); }
+        const px2 = x + pad + k * pasH + 0.4;
+        const py2 = y + 2.6 + r2 * pasV;
+        /* Une fenêtre sur huit est franche, et porte son halo : c'est la
+           brillance. Les autres restent des points. */
+        if (vif) { halo(px2 + 0.7, py2 + 0.5, c2, 0.4 * aL, 2.4, y); }
+        ctx.globalAlpha = aL * al;
+        ctx.fillStyle = teinte(c2);
+        ctx.fillRect(px2, py2, Math.min(1.4, pasH - 1.2), 1.1);
+      }
+    }
+    jouePoints(x, y, w, hh, idx, a, seuil);
+  } else {
+    /* Le jour, le verre ne s'allume pas : il renvoie le ciel. Un dégradé
+       froid par travée, plus franc sur celles qui prennent la lumière de
+       gauche. */
+    for (k = 0; k < n; k++) {
+      const bx = x + pad + k * bwT;
+      const force = 0.1 + 0.16 * (1 - k / n) + (hash(idx, k, 6) % 10) / 100;
+      const gg = ctx.createLinearGradient(0, y, 0, y + hh);
+      gg.addColorStop(0, hsl(205, 30, 86, force));
+      gg.addColorStop(0.75, hsl(205, 26, 72, force * 0.35));
+      gg.addColorStop(1, hsl(205, 22, 64, 0));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = gg;
+      ctx.fillRect(bx + 0.7, y + 2, bwT - 1.4, hh - 3);
+    }
+  }
+  ctx.globalAlpha = a;
+}
+
+/* Le genre d'immeuble, tiré à l'indice. Chaque genre rend une liste de
+   volumes empilés, du socle au sommet ; la somme de leurs hauteurs fait
+   exactement `bh`, et aucun ne dépasse. C'est la silhouette à retraits que
+   le zonage de 1916 a imposée à Manhattan — la raison pour laquelle les
+   tours de New York sont des escaliers. */
+function genre(idx, bw, bh) {
+  let g = hash(idx, 2, 4) % 4;
+  /* En dessous de 34 pixels, un palier ferait deux pixels : les barres
+     courtes ne tirent que les genres qui tiennent en petit. */
+  if (bh < 34) { g = (g % 2) ? 0 : 3; }
+  const blocs = [];
+  if (g === 0) {                      /* la dalle et son édicule */
+    const e = bh > 22 ? 5 : 0;
+    blocs.push({ dx: 0, w: bw, h: bh - e, corps: true });
+    if (e) { blocs.push({ dx: bw * 0.28, w: bw * 0.44, h: e }); }
+  } else if (g === 1) {               /* la tour à retraits */
+    const w2 = Math.max(4, bw * 0.76), w3 = Math.max(3, bw * 0.52);
+    blocs.push({ dx: 0, w: bw, h: bh * 0.56, corps: true });
+    blocs.push({ dx: (bw - w2) / 2, w: w2, h: bh * 0.28, corps: true });
+    blocs.push({ dx: (bw - w3) / 2, w: w3, h: bh * 0.16 });
+  } else if (g === 2) {               /* la tour à flèche */
+    const ws = Math.max(2.5, bw * 0.26);
+    blocs.push({ dx: 0, w: bw, h: bh * 0.82, corps: true });
+    blocs.push({ dx: (bw - ws) / 2, w: ws, h: bh * 0.18 });
+  } else {                            /* l'immeuble à corniche */
+    const deb = Math.min(2, bw * 0.12);
+    blocs.push({ dx: 0, w: bw, h: bh - 2.5, corps: true });
+    blocs.push({ dx: -deb, w: bw + deb * 2, h: 2.5 });
+  }
+  return blocs;
+}
+
+/* Le feu de sommet : le feu rouge d'obstacle, qu'on voit sur toutes les
+   photos de nuit de Manhattan. Une flèche en porte toujours un, et deux
+   superposés sur son mât ; une tour large une fois sur deux.
+
+   C'est un balisage d'aviation, pas un ornement : il se voit de loin. Halo
+   plus large que celui des fenêtres, et un point de deux pixels par-dessus
+   celui de la lampe pour qu'il tienne au milieu des lumières chaudes. Le
+   halo reste coupé au sommet : rien ne dépasse la valeur, pas même une
+   lueur. */
+function couronne(x, y, w, idx, a, fleche) {
+  const tir = hash(idx, 71, 3) % 100;
+  if (!fleche && tir > 54) { return; }
+  const cx = x + w / 2;
+  const force = fleche ? 1 : 0.88 + (hash(idx, 72, 5) % 12) / 100;
+  const aL = aLum(a);
+  lampe(cx, y + 1.8, ROUGE, force, aL, fleche ? 6.6 : 5.2, y);
+  ctx.globalAlpha = Math.min(1, aL * force);
+  ctx.fillStyle = teinte(ROUGE);
+  ctx.fillRect(cx - 1, y + 0.8, 2, 2);
+  if (fleche || tir < 24) {
+    lampe(cx, y + 6.4, ROUGE, force * 0.82, aL, 3.6, y);
+  }
+}
+
+/* Une barre : les volumes de son genre, du socle au sommet, puis les feux. */
+function paintBar(x0, base, bw, bh, idx, here) {
+  const a = ctx.globalAlpha;
+  const m = matiere(idx, here);
+  const blocs = genre(idx, bw, bh);
+  let y = base, haut = null;
+  for (let i = 0; i < blocs.length; i++) {
+    const b = blocs[i];
+    villeBlock(x0 + b.dx, y - b.h, b.w, b.h, m, a);
+    if (b.corps) { travees(x0 + b.dx, y - b.h, b.w, b.h, idx + i * 7, m, a); }
+    y -= b.h;
+    /* Un volume trop mince pour des fenêtres porte des lampes : c'est la
+       règle des paliers étroits, des édicules et des flèches. */
+    if (NIGHT && (b.w < 9 || !b.corps)) {
+      toitures(x0 + b.dx, y, b.w, idx, i, a);
+    }
+    haut = { x: x0 + b.dx, w: b.w, y: y };
+  }
+  if (NIGHT && haut && bh > 16) {
+    couronne(haut.x, haut.y, haut.w, idx, a, haut.w < bw * 0.45);
   }
   ctx.globalAlpha = a;
 }
@@ -5024,15 +5222,19 @@ function tower(x0, base, bw, bh, idx, col, lit) {
    barre, le moindre de ces objets mentirait sur la hauteur, qui est la
    valeur. Ici, rien à mentir.
 
-   Sans cette file, les barres se tiennent sur du vide. Avec elle, le ruban
-   est une rue. */
-function skyline(w, base, top) {
+   La masse monte vers le loin — vers la gauche, où la rue s'élève : le fond
+   file en diagonale comme le sol, et le tirage garde par-dessus le découpage
+   irrégulier. Sans cette file, les barres se tiennent sur du vide. Avec
+   elle, le ruban est une rue. */
+function skyline(w, solY, top) {
   ctx.globalAlpha = NIGHT ? 0.55 : 0.8;
   ctx.fillStyle = C.rule;
-  const unit = 13, room = (base - top) * 0.3;
+  const unit = 13, room = (Math.min(solY(0), solY(w)) - top) * 0.46;
   for (let i = 0, n = Math.ceil(w / unit); i <= n; i++) {
-    const hh = 9 + (hash(i, 5, 11) % 100) / 100 * room;
-    const x = i * unit, bw = unit - 3, y = base - hh;
+    const x = i * unit;
+    const rampe = room * 0.42 * (1 - x / w);
+    const hh = 9 + rampe + (hash(i, 5, 11) % 100) / 100 * room * 0.62;
+    const bw = unit - 3, y = solY(x) - hh;
     ctx.fillRect(x, y, bw, hh);
     const k = hash(i, 7, 3) % 5;
     if (k === 0) {
@@ -5046,48 +5248,26 @@ function skyline(w, base, top) {
   ctx.globalAlpha = 1;
 }
 
-/* La liasse : des bandes de hauteur fixe, empilées depuis le sommet. La
-   hauteur du billet est en pixels et non en dollars — à mille cinq cents
-   dollars le billet, une heure de pointe en aurait empilé cent cinquante,
-   et personne ne compte cent cinquante bandes. C'est une texture qui dit
-   « de l'argent », pas un compte qu'on inviterait à vérifier.
+/* La pente de la rue, et le plancher d'opacité des barres lointaines.
 
-   Le décalage alterné d'un pixel fait la liasse mal rangée. Sans lui, les
-   bandes régulières se lisent comme un dégradé et non comme des billets. */
-const BILL_H = 4, BILL_GAP = 2;
+   La pente fait l'oblique : le sol n'est plus horizontal, il part en haut à
+   gauche et descend vers le bas à droite. Le loin est donc à gauche, le près
+   à droite, et la file se lit comme une rue vue de biais plutôt que comme
+   une façade de face.
 
-function bills(x0, base, bw, bh, idx, col) {
-  ctx.fillStyle = col;
-  const pitch = BILL_H + BILL_GAP;
-  let i = 0;
-  /* Du haut vers le bas : c'est le billet du sommet qui porte la valeur, et
-     lui seul doit tomber pile sur `bh`.
+   C'est une projection oblique et non une perspective : la pente est
+   constante et l'échelle des hauteurs ne change pas d'un bout à l'autre de
+   la file. Une barre deux fois plus haute qu'une autre fait deux fois sa
+   hauteur en pixels où qu'elle soit — ce qu'un point de fuite aurait cassé.
 
-     Le dernier billet est étiré jusqu'au socle. Empilés du haut avec un pas
-     fixe, les billets laissaient sinon le reste de la division en vide sous
-     la liasse — jusqu'à cinq pixels de barre flottante, et le ruban se lit
-     justement à ras du socle. */
-  for (let top = bh; top > 0; top -= pitch, i++) {
-    const next = top - pitch;
-    const hh = next > 0 ? Math.min(BILL_H, top) : top;
-    ctx.fillRect(x0 + (hash(idx, i, 7) % 3) - 1, base - top, bw, hh);
-  }
-}
+   0,045, soit deux degrés et demi : de quoi lire la rue, pas de quoi faire
+   plonger le ruban. Une vraie direction dix heures vers quatre heures ferait
+   trente degrés, et la rue descendrait de plus que la hauteur du cadre.
 
-const PAINT = { trips: tower, revenue: bills };
-
-/* Les teintes de la barre : le pas courant à l'encre, les autres dans le
-   gris de fond.
-
-   Le pas courant était rouge. Le rouge est maintenant pris, et deux fois :
-   l'aiguille du cadran et les chiffres du taximètre. Trois rouges dans un
-   même tableau de bord se disputent le regard, et celui du ruban était le
-   moins utile des trois — le pas courant est déjà sur la ligne du présent,
-   déjà le seul chiffré, déjà le seul à pleine opacité. L'encre suffit. */
-function paintBar(x0, base, bw, bh, idx, here) {
-  (PAINT[S.measure] || tower)(x0, base, bw, bh, idx,
-    here ? MASS_HERE : MASS_FAR, GLASS);
-}
+   0,62 de plancher, et non 0,30 : sous ce voile, les façades perdaient leurs
+   fenêtres avant de perdre leurs volumes, ce qui est l'inverse de ce que
+   fait la distance. */
+const PENTE = 0.045, AMIN = 0.62;
 
 function draw() {
   const w = cv.clientWidth, h = cv.clientHeight;
@@ -5100,30 +5280,50 @@ function draw() {
   /* La profondeur est retirée de la face : face plus joue font la largeur
      qu'avait le rectangle plat, donc l'encombrement d'une barre n'a pas
      changé et l'espacement de la file non plus. */
-  const bw = Math.min(pitch * 0.58, 26) - DEPTH_X;
+  const bw = Math.max(2, Math.min(pitch * 0.58, 26) - DEPTH_X);
   /* `top` garde au-dessus des barres de quoi écrire la valeur du pas
-     courant, et laisse passer le titre posé en surimpression : sans cette
-     réserve, le nombre sort du canvas ou se superpose au titre. */
-  const base = h - 34, top = 34 + HEAD;
-  skyline(w, base, top);
+     courant, et laisse passer le titre posé en surimpression. L'oblique
+     prend six pixels de plus en bas : la file y descend à droite, et les
+     libellés descendent avec elle. */
+  const base = h - 40, top = 34 + HEAD;
+  const nx = NOW_X * w;
+  const solY = px => base + (px - nx) * PENTE;
+  /* Une seule échelle pour toute la file, et c'est celle du point le plus
+     haut du sol : sinon la barre du fond sortirait du cadre, ou il faudrait
+     deux échelles — et deux échelles dans un histogramme font un histogramme
+     faux. */
+  const dispo = Math.min(solY(0), solY(w)) - top;
+  skyline(w, solY, top);
+  /* La rue : un filet le long du sol, qui dit la pente. */
+  ctx.strokeStyle = C.rule;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(0, solY(0)); ctx.lineTo(w, solY(w));
+  ctx.stroke();
+  ctx.globalAlpha = 1;
 
   const scale = META.cycles[S.scope].scales[S.measure];
   ctx.textAlign = "center";
 
+  /* Du fond vers l'avant : à gauche c'est le loin, donc on commence par là,
+     et les barres proches — à droite — recouvrent les lointaines. */
   for (let k = -BEHIND; k <= AHEAD; k++) {
     const idx = ((S.step + k) % n + n) % n;
     /* La position retire la phase : entre deux pas, tout le ruban glisse
        d'une fraction de case vers la gauche. */
     const x = (NOW_X * span + k - t) * pitch;
     if (x < -pitch || x > w + pitch) { continue; }
+    const by = solY(x);
     const v = vals[idx] / max;
-    const bh = Math.max(2, v * (base - top));
+    const bh = Math.max(2, v * dispo);
     const here = k === 0;
     /* Les barres loin du présent s'effacent : le ruban n'a pas de bord net,
        il se perd des deux côtés. */
-    const fade = Math.max(0, 1 - Math.abs(k - (here ? 0 : 0)) / (span * 0.62));
-    ctx.globalAlpha = here ? 1 : 0.3 + fade * 0.58;
-    paintBar(x - bw / 2, base, bw, bh, idx, here);
+    const fade = Math.max(0, 1 - Math.abs(k) / (span * 0.62));
+    ctx.globalAlpha = here ? 1
+      : Math.min(0.95, AMIN + fade * Math.max(0, 0.88 - AMIN));
+    paintBar(x - bw / 2, by, bw, bh, idx, here);
 
     /* Une graduation sur deux sur les cycles dont le pas est une heure : la
        journée en pose vingt-quatre et la semaine cent soixante-huit, et à
@@ -5133,21 +5333,25 @@ function draw() {
        les garde tous. */
     const hourly = S.scope === "hour";
     if (here || !hourly || idx % 2 === 0) {
-      ctx.globalAlpha = here ? 0.95 : 0.3 + fade * 0.4;
+      ctx.globalAlpha = here ? 0.95 : Math.min(0.9, AMIN * 0.8 + fade * 0.4);
       ctx.fillStyle = here ? C.ink : C.dim;
       ctx.font = (here ? "600 " : "") + "11px system-ui, sans-serif";
-      ctx.fillText(META.cycles[S.scope].short[idx], x, base + 16);
+      ctx.fillText(META.cycles[S.scope].short[idx], x, by + 16);
     }
     if (here) {
+      /* Le nombre seul, et le dollar quand ce sont des dollars. « courses »
+         écrit au-dessus de la barre répétait le titre à chaque pas, dans le
+         seul endroit du ruban où la place manque. */
       ctx.font = "600 12px system-ui, sans-serif";
       ctx.fillStyle = C.ink;
-      ctx.fillText(fmt(vals[idx] * scale, S.measure), x, base - bh - 7);
+      const val = vals[idx] * scale;
+      ctx.fillText(S.measure === "revenue" ? "$" + FR(val) : FR(val),
+                   x, by - bh - 7);
     }
   }
   ctx.globalAlpha = 1;
 
   /* Le repère du présent : un trait vertical discret, sous les barres. */
-  const nx = NOW_X * w;
   ctx.strokeStyle = C.rule;
   ctx.lineWidth = 1;
   ctx.beginPath();
