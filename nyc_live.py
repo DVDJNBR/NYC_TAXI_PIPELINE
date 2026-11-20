@@ -4206,19 +4206,34 @@ const ALT = 950;              /* altitude des noms de secteurs             */
    cache derrière une tour : altitude basse, et depthTest coupé pour qu'il
    passe devant tout. */
 const ROAD_Z = 150;
-/* Le plus long trajet du pas met ce temps à être parcouru par sa voiture.
-   C'est l'étalon, partagé par les huit itinéraires : tous les autres en
-   mettent d'autant moins, donc deux voitures se comparent. */
-const ETALON_MS = 2600;
+/* Le plus long trajet du pas met ce temps à être parcouru de bout en bout
+   par son train de flèches. C'est l'étalon, partagé par les quatorze
+   voies : toutes les autres en mettent d'autant moins, donc deux trains
+   qui filent côte à côte se comparent. */
+const ETALON_MS = 1800;
 const ROUTE_N = 32;           /* points par voie                           */
-/* Écart des deux voies de part et d'autre de l'itinéraire, en part de la
-   distance parcourue. */
-const LANE = 0.024;
+/* Écart des deux voies de part et d'autre de l'itinéraire, en degrés et
+   non en part de la distance : les deux chaussées se touchent, comme sur
+   un plan routier, au lieu de s'écarter d'autant plus que le trajet est
+   long. À ce cadrage un degré vaut environ mille neuf cents pixels, donc
+   les deux voies sont séparées de trois pixels et leurs liserés se
+   confondent en une seule bande. */
+const LANE = 0.0021;
+
+/* Distance d'une pastille à sa voie, en part de la longueur du trajet. Les
+   minutes se lisent à côté du trait qu'elles décrivent, et non au bout :
+   au bout, les deux sens se superposaient et il fallait savoir lequel
+   était au-dessus. */
+const PILL_OFF = 0.11, PILL_AT = 0.62;
 const REST = 70;              /* altitude des lumières de rue              */
-/* La voiture est bien plus grande qu'au temps de la nuée : il y en avait
-   trois mille à six pixels, il y en a sept. À six pixels, sept voitures sur
-   une carte de neuf cents sont des poussières. */
-const TAXI_PX = 15;
+/* Posés à plat sur le sol, les chevrons sont écrasés par l'inclinaison de
+   la vue : à cinquante-quatre degrés, un chevron de neuf pixels n'en fait
+   plus que cinq de haut et disparaît sur son trait. */
+const ARROW_PX = 21;
+/* Une flèche tous les tant de degrés : la densité du train est la même sur
+   un trajet court et sur un long, donc ce qui distingue les deux est la
+   vitesse, qui est la donnée. */
+const ARROW_EVERY = 0.0105;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 /* Les sept secteurs dessinés. Staten Island en est absent — six courses par
@@ -4274,31 +4289,37 @@ const GROUND_A = 46 / 255;
 const LIFT = NIGHT ? [152, 148, 174] : [198, 195, 210];
 const LIFT_K = NIGHT ? [0.52, 0.34] : [0.26, 0.30];
 
-/* Le taxi est dessiné dans un canvas, pas chargé : une image venue d'ailleurs
-   aurait demandé un hôte, et un rond ne ressemble pas à une voiture. */
-function taxiAtlas() {
+/* Le chevron est dessiné dans un canvas, pas chargé : une image venue
+   d'ailleurs aurait demandé un hôte.
+
+   Il remplace le taxi. Une voiture par voie disait la durée par le temps
+   qu'elle mettait, mais une seule voiture ne dit pas le sens tant qu'on ne
+   la regarde pas bouger ; un train de chevrons le dit à l'arrêt, sur une
+   image fixe, et c'est ce que fait tout plan routier.
+
+   `mask: true` : la forme est un pochoir blanc, et c'est la couche qui lui
+   donne sa couleur — chaque chevron prend donc celle de sa voie, assombrie. */
+function arrowAtlas() {
   const c = document.createElement("canvas");
   c.width = 64; c.height = 64;
   const g = c.getContext("2d");
-  g.fillStyle = "#2a241c";
-  g.fillRect(14, 15, 11, 6); g.fillRect(14, 43, 11, 6);
-  g.fillRect(39, 15, 11, 6); g.fillRect(39, 43, 11, 6);
-  g.fillStyle = "#edad12";
+  /* Une flèche longue et basse, et non un chevron haut : posée sur une
+     voie de trois pixels, une flèche aussi haute que large débordait sur la
+     voie d'à côté, dont les flèches pointent en sens inverse. Les deux
+     trains se croisaient en X au lieu de se suivre. */
+  g.fillStyle = "#ffffff";
   g.beginPath();
-  if (g.roundRect) { g.roundRect(8, 19, 48, 26, 8); }
-  else { g.rect(8, 19, 48, 26); }
+  g.moveTo(8, 21);
+  g.lineTo(56, 32);
+  g.lineTo(8, 43);
+  g.lineTo(21, 32);
+  g.closePath();
   g.fill();
-  g.fillStyle = "#30281e";
-  g.fillRect(41, 23, 10, 18);
-  g.fillStyle = "#8a6f3a";
-  g.fillRect(20, 25, 16, 14);
-  g.fillStyle = "#fff3cf";
-  g.fillRect(27, 29, 7, 6);
   return c;
 }
-const ATLAS = taxiAtlas();
-const MAPPING = { taxi: { x: 0, y: 0, width: 64, height: 64,
-                          anchorX: 32, anchorY: 32, mask: false } };
+const ATLAS = arrowAtlas();
+const MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64,
+                           anchorX: 32, anchorY: 32, mask: true } };
 
 /* Les aéroports ne sont pas un secteur de la maquette : JFK et LaGuardia
    tombent dans le polygone du Queens, Newark est hors cadre. Mais le ruban
@@ -4461,7 +4482,7 @@ function lanePath(A, B, side) {
   const len = Math.hypot(dx, dy) || 1e-6;
   const px = -dy / len / KLAT, py = dx / len;
   const bow = len * 0.19;
-  const off = side * Math.max(0.0016, len * LANE);
+  const off = side * LANE;
   const ax = A[0] + px * off, ay = A[1] + py * off;
   const bx = B[0] + px * off, by = B[1] + py * off;
   const cx = ax + (bx - ax) * 0.58 + px * bow;
@@ -4527,9 +4548,13 @@ function build() {
     const pb = lanePath(A, B, -1).reverse();
     const k = was[s] || [Math.random(), Math.random()];
     return {
-      s: s, name: SECNAME[s], end: pillSpot(B),
-      ab: { path: pa, cum: cumLen(pa), p: k[0], min: 0, w: 2, c: [128, 128, 128] },
-      ba: { path: pb, cum: cumLen(pb), p: k[1], min: 0, w: 2, c: [128, 128, 128] },
+      s: s, name: SECNAME[s],
+      /* Les deux trains partent en quinconce : partis ensemble, leurs
+         flèches se faisaient face au milieu de la bande. */
+      ab: { path: pa, cum: cumLen(pa), p: k[0], min: 0, w: 2,
+            c: [128, 128, 128], at: pillSpot(A, B, 1) },
+      ba: { path: pb, cum: cumLen(pb), p: (k[1] + 0.5) % 1, min: 0, w: 2,
+            c: [128, 128, 128], at: pillSpot(A, B, -1) },
     };
   });
   SIG = "";
@@ -4674,39 +4699,64 @@ function timeKey() {
   LEGH = el.offsetHeight + 8;
 }
 
-/* Les voitures avancent d'une fraction d'itinéraire par trame, et non
-   d'une position calculée sur l'horloge : la durée change d'un pas à
-   l'autre, et une position déduite du temps absolu ferait sauter la voiture
-   en arrière à chaque changement de pas.
+/* Où se trouve un point à une fraction donnée d'une voie, et dans quel cap.
+   La fraction porte sur la longueur parcourue et non sur le rang du point :
+   sans cela le chevron accélérait dans les virages, où les points de la
+   courbe sont plus serrés. */
+function alongLane(d, f) {
+  const total = d.cum[d.cum.length - 1] || 1;
+  const want = f * total;
+  let j = 1;
+  while (j < d.cum.length - 1 && d.cum[j] < want) { j++; }
+  const seg = (d.cum[j] - d.cum[j - 1]) || 1;
+  const v = (want - d.cum[j - 1]) / seg;
+  const a = d.path[j - 1], b = d.path[j];
+  return [a[0] + (b[0] - a[0]) * v, a[1] + (b[1] - a[1]) * v,
+          Math.atan2(b[1] - a[1], (b[0] - a[0]) * KLAT) * (180 / Math.PI)];
+}
 
-   Le temps mis à parcourir l'itinéraire est proportionnel au temps de
-   trajet mesuré, étalon commun au bloc. Ce n'est donc pas la vitesse de la
-   course qui est montrée — un itinéraire court franchi en peu de temps
-   paraît lent — mais sa durée, qui est la donnée. */
-function rideAdvance(dt) {
+/* Le train de chevrons de chaque voie avance d'une fraction par trame, et
+   non d'une position calculée sur l'horloge : la durée change d'un pas à
+   l'autre, et une position déduite du temps absolu ferait sauter tout le
+   train en arrière à chaque changement de pas.
+
+   Le temps mis à parcourir la voie de bout en bout est proportionnel au
+   temps de trajet mesuré, étalon commun au bloc. Ce n'est donc pas la
+   vitesse de la course qui est montrée — une voie courte franchie en peu
+   de temps paraît lente — mais sa durée, qui est la donnée. La densité des
+   chevrons, elle, est la même partout, pour que seule la vitesse parle.
+
+   Les chevrons prennent la couleur de leur voie, assombrie : posés dessus
+   en clair ils se seraient confondus avec elle, et en blanc ils auraient
+   été la chose la plus voyante de la carte. */
+function arrowsAdvance(dt) {
   const all = lanes();
-  const n = all.length;
-  if (!n) { RIDE = null; return; }
-  const pos = new Float32Array(n * 3), ang = new Float32Array(n);
-  const DEG = 180 / Math.PI;
-  for (let k = 0; k < n; k++) {
-    const d = all[k];
-    const ms = Math.max(600, (d.min / TMAX) * ETALON_MS);
+  if (!all.length) { RIDE = null; return; }
+  let n = 0;
+  for (const d of all) {
+    d.arr = Math.max(4, Math.round(
+      (d.cum[d.cum.length - 1] || 0) / ARROW_EVERY));
+    n += d.arr;
+  }
+  /* Des objets et non des tableaux binaires : la couche des chevrons porte
+     une couleur par chevron, et deck.gl ne rendait rien du tout quand elle
+     lui était passée en attribut binaire. Cent trente-six objets refaits
+     par trame ne coûtent rien à côté. */
+  const items = [];
+  for (const d of all) {
+    const ms = Math.max(420, (d.min / TMAX) * ETALON_MS);
     d.p += dt / ms;
     while (d.p >= 1) { d.p -= 1; }
-    const total = d.cum[d.cum.length - 1] || 1;
-    const want = d.p * total;
-    let j = 1;
-    while (j < d.cum.length - 1 && d.cum[j] < want) { j++; }
-    const seg = (d.cum[j] - d.cum[j - 1]) || 1;
-    const v = (want - d.cum[j - 1]) / seg;
-    const a = d.path[j - 1], b = d.path[j];
-    pos[3 * k] = a[0] + (b[0] - a[0]) * v;
-    pos[3 * k + 1] = a[1] + (b[1] - a[1]) * v;
-    pos[3 * k + 2] = ROAD_Z + 24;
-    ang[k] = Math.atan2(b[1] - a[1], (b[0] - a[0]) * KLAT) * DEG;
+    const c = [Math.round(d.c[0] * 0.5), Math.round(d.c[1] * 0.5),
+               Math.round(d.c[2] * 0.5)];
+    for (let k = 0; k < d.arr; k++) {
+      let f = d.p + k / d.arr;
+      f -= Math.floor(f);
+      const q = alongLane(d, f);
+      items.push({ p: [q[0], q[1], ROAD_Z + 14], a: q[2], c: c });
+    }
   }
-  RIDE = { n: n, pos: pos, ang: ang };
+  RIDE = { n: n, items: items };
 }
 /* Les étiquettes sont ramenées dans le cadre en pixels, pas en degrés : la
    vue est tournée de 29 degrés, si bien qu'une borne en longitude ne
@@ -4739,7 +4789,14 @@ function labelSpots() {
     a => clampedTo(CITY.lonlat[a], ALT + 340, padX, padY, H - padY));
 }
 
-/* La pastille des minutes, ramenée dans le cadre.
+/* La pastille des minutes, posée à côté de sa voie et ramenée dans le
+   cadre.
+
+   À côté et non au bout : au bout, les deux sens se superposaient au même
+   endroit et il fallait savoir lequel était au-dessus. Chacune se range
+   maintenant de son côté du trait, à deux tiers du trajet — assez loin du
+   départ pour que les sept liaisons ne s'empilent pas sur Midtown, assez
+   loin de l'arrivée pour ne pas mordre sur le nom du secteur.
 
    Brooklyn et les aéroports ont leur centre hors champ : leur pastille
    tombait sous le bord inférieur, et deux trajets sur sept n'affichaient
@@ -4748,13 +4805,17 @@ function labelSpots() {
 
    Le bas réserve la hauteur de la clé : une pastille posée dessus la
    rendait illisible. */
-function pillSpot(g) {
+function pillSpot(A, B, side) {
+  const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
+  const len = Math.hypot(dx, dy) || 1e-6;
+  const px = -dy / len / KLAT, py = dx / len;
+  const off = side * Math.max(0.006, len * PILL_OFF);
+  const g = [A[0] + (B[0] - A[0]) * PILL_AT + px * off,
+             A[1] + (B[1] - A[1]) * PILL_AT + py * off];
   const el = document.getElementById("city");
   const W = el.clientWidth || 600, H = el.clientHeight || 400;
   const padX = Math.min(52, W * 0.09);
-  /* Le bas réserve la clé plus la hauteur des deux pastilles empilées :
-     à vingt-six pixels, celle du retour passait par-dessus la clé. */
-  return clampedTo(g, ROAD_Z + 54, padX, HEAD + 14, H - LEGH - 48);
+  return clampedTo(g, ROAD_Z + 54, padX, HEAD + 16, H - LEGH - 20);
 }
 
 /* La pastille des minutes, une par sens, posée à l'arrivée.
@@ -4766,10 +4827,10 @@ function pillSpot(g) {
 
    Le liseré de la pastille reprend la couleur de sa voie, ce qui rattache
    le nombre à son trait quand deux pastilles se touchent. */
-function timePill(id, way, glyph, dy) {
+function timePill(id, way, glyph) {
   return new deck.TextLayer({
     id: id, data: ROUTES, pickable: false,
-    getPosition: d => [d.end[0], d.end[1], ROAD_Z + 54],
+    getPosition: d => [d[way].at[0], d[way].at[1], ROAD_Z + 54],
     getText: d => glyph + Math.round(d[way].min) + " min",
     getSize: 10.5, sizeUnits: "pixels",
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
@@ -4786,7 +4847,6 @@ function timePill(id, way, glyph, dy) {
     },
     getBorderWidth: 1.2,
     getColor: NIGHT ? [238, 235, 246, 255] : [38, 36, 50, 255],
-    getPixelOffset: [0, dy],
     parameters: { depthTest: false },
   });
 }
@@ -4886,8 +4946,8 @@ function staticLayers() {
      est une propriété de la destination, pas du tracé. Le liseré de la
      pastille reprend la couleur de son itinéraire, ce qui rattache le
      nombre à son trait quand deux pastilles se touchent. */
-  out.push(timePill("route-time-ab", "ab", "→ ", 11));
-  out.push(timePill("route-time-ba", "ba", "← ", 29));
+  out.push(timePill("route-time-ab", "ab", "→ "));
+  out.push(timePill("route-time-ba", "ba", "← "));
   /* Sans depthTest coupé, les tours mangeaient la première lettre : le texte
      passait derrière une façade plus haute que son altitude. */
   out.push(new deck.TextLayer({
@@ -4935,34 +4995,21 @@ function staticLayers() {
 function layers() {
   const out = STATIC.slice();
   if (!RIDE) { return out; }
-  /* Une voiture par itinéraire, et non plus une par course. La nuée disait
-     le volume, que le Sankey dit déjà ; la voiture unique dit la durée, par
-     le temps qu'elle met à faire son tracé.
+  /* Le train de chevrons de chaque voie. Il dit le sens à l'arrêt, sur une
+     image fixe, ce qu'une voiture seule ne faisait pas, et il dit la durée
+     par sa vitesse.
 
-     billboard: false la pose à plat sur le plan du sol : elle tourne avec
-     la carte au lieu de rester face à l'écran, et son cap se lit. */
-  /* Un jeton sombre sous la voiture. Sans lui, un taxi jaune posé sur une
-     route orange disparaît : c'est la même famille de couleur, et la
-     voiture faisait un épaississement du trait au lieu d'un véhicule. Le
-     jeton creuse la route, comme le curseur d'un GPS. */
-  out.push(new deck.ScatterplotLayer({
-    id: "ride-puck", pickable: false,
-    data: { length: RIDE.n,
-            attributes: { getPosition: { value: RIDE.pos, size: 3 } } },
-    radiusUnits: "pixels", getRadius: TAXI_PX * 0.6,
-    stroked: true, filled: true, lineWidthUnits: "pixels",
-    getLineWidth: 1.4,
-    getFillColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 236],
-    getLineColor: [LIFT[0], LIFT[1], LIFT[2], 180],
-    parameters: { depthTest: false },
-  }));
+     billboard: false le pose à plat sur le plan du sol : il tourne avec la
+     carte au lieu de rester face à l'écran, donc son cap suit la route. */
   out.push(new deck.IconLayer({
     id: "ride", iconAtlas: ATLAS, iconMapping: MAPPING,
-    data: { length: RIDE.n,
-            attributes: { getPosition: { value: RIDE.pos, size: 3 },
-                          getAngle: { value: RIDE.ang, size: 1 } } },
-    getIcon: () => "taxi", sizeUnits: "pixels", getSize: TAXI_PX,
+    data: RIDE.items, pickable: false,
+    getPosition: d => d.p, getAngle: d => d.a,
+    getColor: d => d.c,
+    getIcon: () => "arrow", sizeUnits: "pixels", getSize: ARROW_PX,
     billboard: false, parameters: { depthTest: false },
+    updateTriggers: { getPosition: RIDE.items, getAngle: RIDE.items,
+                      getColor: RIDE.items },
   }));
   return out;
 }
@@ -5070,7 +5117,7 @@ function frame(now) {
     const dt = started ? Math.min(90, t - started) : 16;
     started = t;
     refresh(false);
-    rideAdvance(dt);
+    arrowsAdvance(dt);
     deckgl.setProps({ layers: layers() });
   }
   requestAnimationFrame(frame);
