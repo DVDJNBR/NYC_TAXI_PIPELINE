@@ -4209,31 +4209,35 @@ const ROAD_Z = 150;
 /* Le plus long trajet du pas met ce temps à être parcouru de bout en bout
    par son train de flèches. C'est l'étalon, partagé par les quatorze
    voies : toutes les autres en mettent d'autant moins, donc deux trains
-   qui filent côte à côte se comparent. */
-const ETALON_MS = 1800;
+   qui filent côte à côte se comparent.
+
+   Six secondes et non deux : à deux secondes les quatorze trains filaient
+   tous à la fois et la carte devenait agitée. Ce qui porte la donnée est
+   le rapport des vitesses entre deux voies, pas la vitesse elle-même, et
+   ce rapport se lit mieux au pas du ruban qu'à celui d'un jeu. */
+const ETALON_MS = 6200;
 const ROUTE_N = 32;           /* points par voie                           */
 /* Écart des deux voies de part et d'autre de l'itinéraire, en degrés et
    non en part de la distance : les deux chaussées se touchent, comme sur
    un plan routier, au lieu de s'écarter d'autant plus que le trajet est
    long. À ce cadrage un degré vaut environ mille neuf cents pixels, donc
-   les deux voies sont séparées de trois pixels et leurs liserés se
-   confondent en une seule bande. */
-const LANE = 0.0021;
+   les deux voies sont séparées de deux pixels et demi : leurs liserés se
+   recouvrent et la liaison ne montre qu'une bande. */
+const LANE = 0.0013;
 
 /* Distance d'une pastille à sa voie, en part de la longueur du trajet. Les
    minutes se lisent à côté du trait qu'elles décrivent, et non au bout :
    au bout, les deux sens se superposaient et il fallait savoir lequel
    était au-dessus. */
 const PILL_OFF = 0.11, PILL_AT = 0.62;
-const REST = 70;              /* altitude des lumières de rue              */
-/* Posés à plat sur le sol, les chevrons sont écrasés par l'inclinaison de
-   la vue : à cinquante-quatre degrés, un chevron de neuf pixels n'en fait
-   plus que cinq de haut et disparaît sur son trait. */
-const ARROW_PX = 21;
+/* Posés à plat sur le sol, les triangles sont écrasés par l'inclinaison
+   de la vue : à cinquante-quatre degrés, un triangle de neuf pixels n'en
+   fait plus que cinq de haut et disparaît sur son trait. */
+const ARROW_PX = 17;
 /* Une flèche tous les tant de degrés : la densité du train est la même sur
    un trajet court et sur un long, donc ce qui distingue les deux est la
    vitesse, qui est la donnée. */
-const ARROW_EVERY = 0.0105;
+const ARROW_EVERY = 0.0092;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 /* Les sept secteurs dessinés. Staten Island en est absent — six courses par
@@ -4303,16 +4307,15 @@ function arrowAtlas() {
   const c = document.createElement("canvas");
   c.width = 64; c.height = 64;
   const g = c.getContext("2d");
-  /* Une flèche longue et basse, et non un chevron haut : posée sur une
-     voie de trois pixels, une flèche aussi haute que large débordait sur la
-     voie d'à côté, dont les flèches pointent en sens inverse. Les deux
-     trains se croisaient en X au lieu de se suivre. */
+  /* Un triangle plein, long et bas, et non un chevron haut : posé sur une
+     voie de deux pixels et demi, un marqueur aussi haut que large débordait
+     sur la voie d'à côté, dont les triangles pointent en sens inverse. Les
+     deux trains se croisaient en X au lieu de se suivre. */
   g.fillStyle = "#ffffff";
   g.beginPath();
-  g.moveTo(8, 21);
-  g.lineTo(56, 32);
-  g.lineTo(8, 43);
-  g.lineTo(21, 32);
+  g.moveTo(10, 22);
+  g.lineTo(54, 32);
+  g.lineTo(10, 42);
   g.closePath();
   g.fill();
   return c;
@@ -4338,7 +4341,7 @@ let deckgl = null, VIEWSTATE = null, LABEL_POS = null, started = 0;
    tous les autres, donc celui qui a le plus à dire au premier regard. Le
    survol d'une zone en change. */
 let FOCUS = 1, SECNAME = [], ROUTES = [], TMIN = 0, TMAX = 1, BAND = {};
-let SIG = "", LIGHTS = null;
+let SIG = "";
 
 /* Le secteur d'un index, au nom qu'emploient les agrégats. La maquette
    nomme son neuvième secteur « EWR », là où les agrégats disent
@@ -4618,55 +4621,6 @@ function setFocus(s) {
   build();
 }
 
-/* Les lumières de la ville. Elles ne portent aucune donnée, et c'est dit
-   ici une fois pour toutes : comme les tours elles-mêmes, elles situent.
-   Aucun nombre ne s'y lit, aucune ne s'allume ni ne s'éteint avec le pas.
-
-   Elles sont là parce que la carte les a perdues. La nuée de taxis posés
-   semait des points chauds entre les tours, et c'est elle qui faisait la
-   ville de nuit ; en la retirant avec les flux, on a éteint la maquette.
-   Le ruban d'à côté allume ses façades et pose un feu rouge au sommet des
-   plus hautes : les deux blocs se répondent.
-
-   Tirées une fois au chargement. Un tirage par image ferait scintiller la
-   ville entière, ce qui est le défaut de toutes les maquettes nocturnes. */
-function cityLights() {
-  const roof = [], beacon = [], street = [];
-  for (const d of CITY.bld) {
-    const H = d.h * EXAG;
-    let cx = 0, cy = 0;
-    for (const q of d.p) { cx += q[0]; cy += q[1]; }
-    cx /= d.p.length; cy /= d.p.length;
-    /* Deux à quatre lumières par toit selon la taille de l'emprise, posées
-       six unités au-dessus : à la hauteur exacte du toit elles entraient en
-       conflit de profondeur avec lui et clignotaient. */
-    const n = d.h > 160 ? 3 : d.h > 95 ? 2 : 1;
-    for (let k = 0; k < n; k++) {
-      const a = d.p[(Math.random() * d.p.length) | 0];
-      const v = 0.25 + 0.6 * Math.random();
-      roof.push({ p: [cx + (a[0] - cx) * v, cy + (a[1] - cy) * v, H + 6],
-                  a: 62 + 96 * Math.random() });
-    }
-    /* Le feu d'obstacle, sur les quatre-vingt-quatorze tours de plus de
-       deux cents pieds. Même rouge que celui du ruban. */
-    if (d.h > 200) { beacon.push({ p: [cx, cy, H + 22] }); }
-  }
-  /* Les lumières de rue, tirées dans les réservoirs de points des secteurs
-     — ceux-là mêmes où les taxis se posaient. C'est ce qui remplit le vide
-     entre les tours, et sans quoi seuls les toits brillent. */
-  const b = CITY.pools.b, sc = CITY.pools.sc;
-  for (const flat of CITY.pools.pt) {
-    const n = flat.length / 2;
-    for (let k = 0; k < Math.min(55, n); k++) {
-      const i = (Math.random() * n) | 0;
-      street.push({ p: [b[0] + flat[2 * i] / sc, b[1] + flat[2 * i + 1] / sc,
-                        REST],
-                    a: 46 + 62 * Math.random() });
-    }
-  }
-  return { roof: roof, beacon: beacon, street: street };
-}
-
 /* La clé de la carte, posée dans la bande du bas.
 
    Elle remplace la légende des couleurs de secteurs, qui serait devenue
@@ -4744,7 +4698,7 @@ function arrowsAdvance(dt) {
      par trame ne coûtent rien à côté. */
   const items = [];
   for (const d of all) {
-    const ms = Math.max(420, (d.min / TMAX) * ETALON_MS);
+    const ms = Math.max(2100, (d.min / TMAX) * ETALON_MS);
     d.p += dt / ms;
     while (d.p >= 1) { d.p -= 1; }
     const c = [Math.round(d.c[0] * 0.5), Math.round(d.c[1] * 0.5),
@@ -4884,29 +4838,6 @@ function staticLayers() {
     material: { ambient: 0.70, diffuse: 0.62, shininess: 10,
                 specularColor: [30, 28, 38] },
   }));
-  /* Les lumières de la ville, posées sur la maquette et pas sur la donnée.
-     Elles ne s'allument qu'à la nuit : de jour, un point chaud sur un toit
-     clair est une salissure. */
-  if (NIGHT && LIGHTS) {
-    out.push(new deck.ScatterplotLayer({
-      id: "street", data: LIGHTS.street, pickable: false,
-      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 0.9,
-      stroked: false, filled: true,
-      getFillColor: d => [255, 198, 116, d.a],
-    }));
-    out.push(new deck.ScatterplotLayer({
-      id: "roof", data: LIGHTS.roof, pickable: false,
-      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 1.05,
-      stroked: false, filled: true,
-      getFillColor: d => [255, 210, 138, d.a],
-    }));
-    out.push(new deck.ScatterplotLayer({
-      id: "beacon", data: LIGHTS.beacon, pickable: false,
-      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 1.6,
-      stroked: false, filled: true,
-      getFillColor: [226, 96, 74, 215],
-    }));
-  }
   /* Un itinéraire se dessine en deux couches : le liseré sombre, large, et
      le tracé coloré, fin, par-dessus. C'est la recette de tous les GPS, et
      deck.gl n'a pas de propriété pour la faire d'un coup. Sans le liseré,
@@ -5078,7 +5009,6 @@ async function boot() {
     AIRNODE = CITY.air.node;
   }
   fatten();
-  LIGHTS = cityLights();
   deckgl = new deck.DeckGL({
     container: "city",
     initialViewState: fitted(),
