@@ -156,7 +156,7 @@ def available() -> bool:
 # Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
 # changement de structure ne serait pas vu tant que les agrégats ne sont pas
 # reconstruits, et le composant lirait un fichier à l'ancien format.
-PAYLOAD_VERSION = 17
+PAYLOAD_VERSION = 18
 
 
 @st.cache_data(show_spinner=False)
@@ -407,6 +407,18 @@ def _flows(od: pd.DataFrame) -> dict:
     Assez petit pour voyager en JSON. Les flux internes à un secteur sont
     gardés ici — c'est le composant qui décidera de les montrer ou non, et
     ils servent au total de chaque nœud.
+
+    Chaque liaison porte deux séries : `v`, le nombre de courses du pas, et
+    `m`, le temps de trajet. La médiane et non la moyenne : la distribution
+    des durées penche à droite, et une poignée de courses prises dans un
+    bouchon — ou un compteur oublié une heure — déplace la moyenne d'une
+    liaison entière sans décrire aucun trajet réel. Sur Airports -> Midtown
+    à 8 h, la moyenne dit 51,3 min et la médiane 47,9.
+
+    Un pas sans course n'a pas de ligne dans le Parquet, donc pas de durée.
+    La série est alors prolongée par la valeur voisine : un trou vaut mieux
+    rempli par le temps de l'heure d'avant que par un zéro, qui ferait
+    passer la liaison pour instantanée.
     """
     out = {}
     valid = set(nyc_zones.AREAS)
@@ -415,13 +427,16 @@ def _flows(od: pd.DataFrame) -> dict:
         part = od[od["SCOPE"] == scope]
         rows = []
         for (pu, do), g in part.groupby(["PU_AREA", "DO_AREA"]):
-            series = (g.set_index("STEP")["TOTAL_TRIPS"]
-                       .reindex(range(cycle["steps"]))
-                       .fillna(0.0))
+            g = g.set_index("STEP")
+            series = (g["TOTAL_TRIPS"].reindex(range(cycle["steps"]))
+                                      .fillna(0.0))
             if series.sum() < 1:
                 continue
+            mins = (g["MED_MINUTES"].reindex(range(cycle["steps"]))
+                                    .ffill().bfill().fillna(0.0))
             rows.append({"s": pu, "t": do,
-                         "v": [round(float(x), 1) for x in series]})
+                         "v": [round(float(x), 1) for x in series],
+                         "m": [round(float(x), 1) for x in mins]})
         out[scope] = rows
     return out
 
@@ -513,6 +528,18 @@ def kpis(height: int = 160) -> None:
 VIEW = {"pitch": 50, "bearing": -18}
 
 
+# L'ambre du milieu de la rampe du trafic. Elle n'est pas un mélange des deux
+# bouts : interpoler le vert de BETTER vers le rouge de WORSE passe par un
+# brun qui ne dit ni l'un ni l'autre. Elle n'est pas non plus le jaune du
+# taxi, qui est déjà pris par le point qui roule sur la bande.
+_AMBER = {"dark": "#c98b3c", "light": "#b07424"}
+
+
+def _ramp() -> list:
+    p = nyc_theme.palette()
+    return [p["BETTER"], _AMBER[nyc_theme.mode()], p["WORSE"]]
+
+
 def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
     """La carte à pics. Hauteur et couleur suivent la mesure du pas."""
     meta()
@@ -526,17 +553,23 @@ def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
 
 def taxi_city(height: int = 460, title: str = "",
               hint: str = "", legend: bool = False) -> None:
-    """La maquette de New York, un taxi par course.
+    """La maquette de New York, et le temps de trajet depuis un secteur.
 
     Les tours posent le sol et ne portent aucune donnée : elles situent. Ce
-    qui porte la donnée est le jaune, et lui seul — d'où une carte en gris
-    violacé où rien d'autre n'est chaud.
+    qui porte la donnée est le sol, coloré par le temps qu'il faut pour
+    l'atteindre, et les huit itinéraires qui en partent.
+
+    Elle a montré les flux pendant plusieurs versions, un taxi par course.
+    Le Sankey d'à côté montrait les mêmes flux : deux dessins qui disent la
+    même chose font croire à deux mesures. Ce que la carte sait faire et que
+    lui ne peut pas est la géographie du temps.
     """
     meta()
     head = (_head(title, hint, ink="#f2efe6", dim="rgba(242,239,230,0.62)")
             if nyc_theme.mode() == "dark" else
             _head(title, hint, ink="#1b1b1f", dim="rgba(27,27,31,0.58)"))
-    st.iframe(_html(_CITY, _cfg(head=head, legend=legend)), height=height)
+    st.iframe(_html(_CITY, _cfg(head=head, legend=legend, ramp=_ramp())),
+              height=height)
 
 
 def profile(height: int = 240, title: str = "", hint: str = "") -> None:
@@ -4141,20 +4174,26 @@ _CITY = r"""
 <script src="https://unpkg.com/deck.gl@8.9.36/dist.min.js"></script>
 <div id="city" style="position:absolute; inset:0;"></div>
 <script>
-/* Deux cent soixante et un gratte-ciel posent le sol, et au-dessus un taxi
-   vaut une course. Le taxi part d'un endroit tiré au hasard dans sa zone de
-   départ, rejoint un axe, traverse, puis se disperse vers un endroit tiré au
-   hasard dans sa zone d'arrivée.
+/* Deux mille six cents gratte-ciel posent le sol, et au-dessus la carte
+   répond à une seule question : depuis ce secteur, combien de temps pour
+   aller partout ailleurs.
 
-   L'axe n'est pas un décor : sans lui, mille directions partaient en même
-   temps depuis mille points différents et la ville devenait une ruche. Les
-   courses qui restent dans leur zone ne voyagent pas — un trait aurait
-   inventé un trajet qu'on ne connaît pas. Elles se posent et font la
-   densité.
+   Elle a d'abord montré les flux, une voiture par course. Mais le Sankey
+   d'à côté montre les mêmes flux, et mieux : deux dessins qui disent la
+   même chose font croire à deux mesures. Ce que la carte sait faire et que
+   lui ne peut pas, c'est la géographie du temps — quel secteur est loin,
+   lequel est près, et de combien ça change entre cinq heures et dix-huit
+   heures.
+
+   La forme est celle d'une isochrone, qui est la forme cartographique faite
+   pour cette question : un point de départ, et le reste du plan coloré par
+   le temps qu'il faut pour l'atteindre. Par-dessus, huit itinéraires à la
+   manière d'un GPS — liseré sombre, tracé coloré, une voiture dessus — et
+   le nombre de minutes écrit à l'arrivée.
 
    Les tours prennent la couleur du sol de leur secteur : le relief ne vient
-   que de la lumière. Toute couleur chaude sur la carte entrerait en
-   concurrence avec le jaune des taxis, qui est la seule donnée en mouvement.
+   que de la lumière. Les seules couleurs franches sont celles du temps, et
+   le jaune du taxi.
 */
 const NIGHT = CFG.mode === "dark";
 
@@ -4162,19 +4201,24 @@ const NIGHT = CFG.mode === "dark";
    On garde les emprises et les hauteurs réelles mais on les grossit, comme
    une maquette. */
 const EXAG = 3.2, FOOT = 2.4;
-const ALT = 950;              /* altitude de vol, au ras des toits          */
-/* Les arcs de flux partent sous les taxis : ils sont le dessous de la scène,
-   la voiture est au-dessus. */
-const ARC_Z = 420;
-const REST = 70;              /* altitude des taxis posés, entre les tours  */
-const SPEED = 0.055;          /* degrés par seconde : vitesse constante     */
-const TAXI_PX = 6.2;
-
-const PER_AXIS = 260;         /* courses par axe avant d'en ouvrir un autre */
-const MAX_AXIS = 5;
-const AXIS_GAP = 0.0062;
-const JITTER = 0.0011;
-const IN = 0.20, OUT = 0.80;  /* part du trajet passée à rejoindre l'axe    */
+const ALT = 950;              /* altitude des noms de secteurs             */
+/* Un tracé de GPS est un calque posé sur la ville, pas un objet qui s'y
+   cache derrière une tour : altitude basse, et depthTest coupé pour qu'il
+   passe devant tout. */
+const ROAD_Z = 150;
+/* Le plus long trajet du pas met ce temps à être parcouru par sa voiture.
+   C'est l'étalon, partagé par les huit itinéraires : tous les autres en
+   mettent d'autant moins, donc deux voitures se comparent. */
+const ETALON_MS = 2600;
+const ROUTE_N = 32;           /* points par voie                           */
+/* Écart des deux voies de part et d'autre de l'itinéraire, en part de la
+   distance parcourue. */
+const LANE = 0.024;
+const REST = 70;              /* altitude des lumières de rue              */
+/* La voiture est bien plus grande qu'au temps de la nuée : il y en avait
+   trois mille à six pixels, il y en a sept. À six pixels, sept voitures sur
+   une carte de neuf cents sont des poussières. */
+const TAXI_PX = 15;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 /* Les sept secteurs dessinés. Staten Island en est absent — six courses par
@@ -4265,237 +4309,485 @@ const AIR_CODE = { "JFK Airport": "JFK", "LaGuardia Airport": "LGA",
                    "Newark Airport": "EWR" };
 let AIRPORTS = [], AIR_RGB = [120, 120, 130];
 
-let CITY = null, POOL = null, GROUND = null, SPACED = null;
-let MOV = null, SIT = null, AXES = [], ARCS = [], STATIC = [];
+let CITY = null, GROUND = null, SPACED = null;
+let RIDE = null, TIMES = {}, STATIC = [];
 let deckgl = null, VIEWSTATE = null, LABEL_POS = null, started = 0;
 
-function pick(s) { return POOL[s][(Math.random() * POOL[s].length) | 0]; }
+/* Le secteur de départ. Midtown par défaut : c'est celui qui échange avec
+   tous les autres, donc celui qui a le plus à dire au premier regard. Le
+   survol d'une zone en change. */
+let FOCUS = 1, SECNAME = [], ROUTES = [], TMIN = 0, TMAX = 1, BAND = {};
+let SIG = "", LIGHTS = null;
 
-/* Un tableau de flux par cycle, et non les seules vingt-quatre heures.
-   Jusqu'ici le jour et le mois n'avaient que leur moyenne — un seul nombre,
-   le même aux sept ou douze pas : le nombre de taxis ne bougeait pas d'un
-   lundi à un samedi.
-
-   L'unité est la course par heure sur les trois cycles. Un pas de mois
-   compte un mois entier, vingt-quatre fois un pas d'heure ; à un taxi par
-   course, l'année aurait affiché 120 000 voitures contre 5 000 à l'heure.
-   scripts/J_build_cycles.py divise donc les pas de mois par vingt-quatre à
-   l'écriture des agrégats, et un taxi vaut partout la même chose : une
-   course de l'heure moyenne du pas. */
-function matrix() {
-  const m = CITY.trips[S.scope] || CITY.trips.hour;
-  return m[((S.step % m.length) + m.length) % m.length];
+/* Le secteur d'un index, au nom qu'emploient les agrégats. La maquette
+   nomme son neuvième secteur « EWR », là où les agrégats disent
+   « Airports » : c'est le même secteur, et c'est le nom des agrégats qui
+   sert de clé entre les deux. */
+function secNames() {
+  return CITY.order.map((n, i) => (i === AIRSEC ? "Airports" : n));
 }
 
-/* Les liaisons retenues, dans l'ordre décroissant, avec leur épaisseur et
-   leur couleur. L'épaisseur suit la racine du volume : une liaison dix fois
-   plus forte est trois fois plus épaisse, ce qui est la règle d'un tracé de
-   flux — l'oeil compare des surfaces, pas des largeurs. */
-function arcTop(all) {
-  if (!all.length) { return []; }
-  let max = 0;
-  for (const q of all) { if (q.n > max) { max = q.n; } }
-  const keep = all.filter(q => q.n >= max * ARC_MIN)
-    .sort((x, y) => y.n - x.n).slice(0, ARC_KEEP);
-  return keep.map(q => {
-    const A = nodeAt(q.a), B = nodeAt(q.b);
-    const c = TINT[secOf(q.a)] || [120, 120, 130];
-    return { s: [A[0], A[1], ARC_Z], t: [B[0], B[1], ARC_Z],
-             w: 0.7 + 3.1 * Math.sqrt(q.n / max),
-             c: [c[0], c[1], c[2]] };
-  });
+/* Le nœud de dessin qui porte un secteur. Les aéroports en ont deux, et
+   c'est le plus chargé du pas qui l'emporte : JFK prend 97 % des départs à
+   5 h et 40 % à 10 h, donc l'itinéraire change de bout dans la journée. */
+function mainNode(s) {
+  const list = spread(s);
+  let best = list[0];
+  for (const q of list) { if (q[1] > best[1]) { best = q; } }
+  return best[0];
 }
 
-function axesFor(a, b, n) {
-  const A = nodeAt(a), B = nodeAt(b);
-  const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
-  const len = Math.hypot(dx, dy) || 1;
-  const px = -dy / len / KLAT, py = dx / len;
-  const out = [];
-  for (let k = 0; k < n; k++) {
-    const off = (k - (n - 1) / 2) * AXIS_GAP;
-    out.push([[A[0] + (B[0] - A[0]) * 0.17 + px * off,
-               A[1] + (B[1] - A[1]) * 0.17 + py * off],
-              [A[0] + (B[0] - A[0]) * 0.83 + px * off,
-               A[1] + (B[1] - A[1]) * 0.83 + py * off],
-              [px, py]]);
+/* Les temps de trajet entre le secteur de départ et les autres, dans les
+   deux sens, au moment courant du cycle.
+
+   Les deux sens parce qu'ils ne durent pas pareil : à 8 h, Airports vers
+   Midtown prend 47,9 min et Midtown vers Airports 31,5. Une heure et demie
+   aller-retour, dont un tiers tient au seul sens de la course. Une carte
+   qui n'en montrerait qu'un mentirait sur la moitié du trajet.
+
+   Interpolés entre deux pas et non pris au pas courant. Le ruban glisse,
+   les cadrans glissent ; une carte dont les durées sautaient d'un coup à
+   chaque changement de pas jurait avec le reste du cockpit. Les minutes
+   montent donc graduellement, et la couleur des tracés avec elles.
+
+   La médiane et non la moyenne : la distribution des durées penche à
+   droite, et une poignée de courses prises dans un bouchon — ou un compteur
+   oublié une heure — déplace la moyenne d'une liaison sans décrire aucun
+   trajet réel. Sur Airports vers Midtown à 8 h, la moyenne dit 51,3 min et
+   la médiane 47,9. */
+function timesAround(name) {
+  const n = stepsOf(S.scope);
+  const i = ((S.step % n) + n) % n, j = (i + 1) % n, t = phase();
+  const out = {};
+  for (const f of META.flows[S.scope] || []) {
+    if (!f.m) { continue; }
+    const away = f.s === name && f.t !== name;
+    const back = f.t === name && f.s !== name;
+    if (!away && !back) { continue; }
+    const key = away ? f.t : f.s;
+    const o = out[key] || (out[key] = {});
+    o[away ? "ab" : "ba"] = {
+      min: f.m[i] + (f.m[j] - f.m[i]) * t,
+      trips: f.v[i] + (f.v[j] - f.v[i]) * t,
+    };
   }
   return out;
 }
 
-/* À quel secteur appartient un nœud. Les nœuds d'aéroport prennent la suite
-   des secteurs dessinés, et ils appartiennent tous au secteur des
-   aéroports. */
-function secOf(i) {
-  return i < CITY.lonlat.length ? i : AIRSEC;
+/* Un secteur peut-il servir de départ. Staten Island n'en est pas : six
+   courses par jour, et ses rares liaisons portent des durées de deux heures
+   et demie qui écraseraient toute l'échelle. */
+function canFocus(s) {
+  const name = SECNAME[s] || "";
+  let k = 0;
+  for (const f of META.flows[S.scope] || []) {
+    if (f.m && f.s === name && f.t !== name && f.v[S.step] > 0.5) { k++; }
+  }
+  return k >= 3;
 }
 
-/* Les liaisons gardées pour le tracé : les plus fortes, jusqu'à quarante-
-   huit, et au moins un cinquantième de la plus forte.
+/* La rampe des trois couleurs du trafic : le vert du plus court trajet,
+   l'ambre du milieu, le rouge du plus long. Interpolée entre deux bornes
+   voisines seulement — du vert au rouge en une seule marche, on passe par
+   un brun qui ne dit rien. */
+function ramp(u) {
+  const st = CFG.ramp;
+  const v = Math.max(0, Math.min(1, u));
+  const k = v <= 0.5 ? 0 : 1;
+  const t = v <= 0.5 ? v * 2 : (v - 0.5) * 2;
+  const a = rgb(st[k]), b = rgb(st[k + 1]);
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
+          a[2] + (b[2] - a[2]) * t];
+}
 
-   Tout tracer faisait soixante-douze arcs sur neuf nœuds, donc un écheveau
-   où l'on ne lisait plus une seule liaison. Le seuil et le plafond laissent
-   voir la structure — Midtown au centre de tout, les deux aéroports vers
-   Manhattan — sans la noyer. */
-const ARC_KEEP = 48, ARC_MIN = 0.02;
+/* Où tombe un secteur entre le plus court et le plus long trajet.
+   undefined quand il n'est pas desservi à ce pas.
 
+   La table est celle des secteurs qui portent un itinéraire, et pas celle
+   des temps connus : Staten Island a bien une durée depuis Midtown, mais
+   deux heures et demie sur une demi-course à l'heure. Peinte comme les
+   autres, elle prenait le rouge du plus lointain et c'est elle qui tenait
+   le haut de l'échelle, alors qu'aucun itinéraire ne lui est tracé. Un sol
+   coloré doit avoir son trait.
+
+   C'est l'aller qui colore le sol, pas le retour : la question que pose une
+   isochrone est « combien de temps pour y aller ». */
+function bandOf(s) { return BAND[s]; }
+
+/* La couleur du sol d'un secteur : l'isochrone, en valeur et non en teinte.
+
+   Le sol a d'abord porté la rampe du trafic, vert à rouge, comme les
+   itinéraires. C'était illisible : le Queens et Brooklyn sont d'immenses
+   surfaces presque vides de tours, et deux aplats orange de cette taille
+   écrasaient la maquette entière. La règle que la carte suit depuis le
+   début — rien de saturé au-dessus du sol sauf le jaune du taxi — est ce
+   qui la rend lisible, et la rampe la violait à elle seule.
+
+   Le temps se lit donc en clarté : le secteur le plus proche s'éclaire,
+   le plus lointain s'enfonce dans la nuit. C'est un dégradé séquentiel à
+   teinte unique, la forme faite pour une grandeur ordonnée, et il laisse
+   la couleur du trafic aux seuls itinéraires, qui sont fins.
+
+   La teinte de secteur reste dessous : on reconnaît toujours Brooklyn de
+   Queens, mais c'est leur clarté qui dit lequel est près. */
+function groundOf(s) {
+  if (s === FOCUS) {
+    const a = rgb(C.accent);
+    return [a[0], a[1], a[2], 74];
+  }
+  const u = bandOf(s);
+  if (u === undefined) { return [TINT[s][0], TINT[s][1], TINT[s][2], 22]; }
+  const k = 1 - Math.max(0, Math.min(1, u));
+  const t = TINT[s];
+  const c = [t[0] + (LIFT[0] - t[0]) * 0.34 * k,
+             t[1] + (LIFT[1] - t[1]) * 0.34 * k,
+             t[2] + (LIFT[2] - t[2]) * 0.34 * k];
+  return [c[0], c[1], c[2], 34 + 72 * k];
+}
+
+/* Une voie d'itinéraire, aller ou retour.
+
+   Pas un segment droit : un trait tendu entre deux centres est un arc de
+   flux, et c'est précisément ce que ce bloc ne montre plus. La courbe est
+   une quadratique dont le point de contrôle est écarté de la corde et
+   poussé vers l'arrivée — l'asymétrie est ce qui la fait lire comme un
+   chemin et non comme une parabole.
+
+   Les deux sens prennent chacun leur voie, de part et d'autre de cette
+   courbe, comme les deux chaussées d'une avenue. Superposés, ils se
+   seraient masqués l'un l'autre et seule la durée du dessus se serait vue. */
+function lanePath(A, B, side) {
+  const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
+  const len = Math.hypot(dx, dy) || 1e-6;
+  const px = -dy / len / KLAT, py = dx / len;
+  const bow = len * 0.19;
+  const off = side * Math.max(0.0016, len * LANE);
+  const ax = A[0] + px * off, ay = A[1] + py * off;
+  const bx = B[0] + px * off, by = B[1] + py * off;
+  const cx = ax + (bx - ax) * 0.58 + px * bow;
+  const cy = ay + (by - ay) * 0.58 + py * bow;
+  const out = [];
+  for (let k = 0; k < ROUTE_N; k++) {
+    const u = k / (ROUTE_N - 1), w = 1 - u;
+    out.push([w * w * ax + 2 * w * u * cx + u * u * bx,
+              w * w * ay + 2 * w * u * cy + u * u * by,
+              ROAD_Z]);
+  }
+  return out;
+}
+
+/* Longueur cumulée d'une voie, corrigée de la latitude. Elle sert à faire
+   avancer la voiture à vitesse constante : sans elle, elle accélérait dans
+   les virages, où les points sont plus serrés. */
+function cumLen(path) {
+  const out = [0];
+  for (let k = 1; k < path.length; k++) {
+    out.push(out[k - 1] + Math.hypot((path[k][0] - path[k - 1][0]) * KLAT,
+                                     path[k][1] - path[k - 1][1]));
+  }
+  return out;
+}
+
+/* Les deux voies de chaque liaison, à plat, pour les couches qui dessinent
+   un trait par sens. */
+function lanes() {
+  const out = [];
+  for (const r of ROUTES) { out.push(r.ab, r.ba); }
+  return out;
+}
+
+/* La géométrie. Elle ne dépend que du secteur de départ et du nœud
+   d'aéroport retenu — pas du moment dans le pas — donc elle se calcule au
+   changement d'état et pas à chaque trame. */
 function build() {
-  const m = matrix();
-  const o = [], e1 = [], e2 = [], d = [], inv = [], ph = [];
-  const rp = [];
-  const arcs = [];
-  AXES = [];
-  /* Les secteurs de départ et d'arrivée possibles : les sept dessinés, plus
-     celui des aéroports, que spread() développera en deux nœuds. */
-  const SRC = AIRSEC >= 0 ? SECTORS.concat([AIRSEC]) : SECTORS;
-  for (const sa of SRC) {
-    for (const sb of SRC) {
-      if (!(m[sa][sb] > 0)) { continue; }
-      for (const [a, wa] of spread(sa)) {
-        for (const [b, wb] of spread(sb)) {
-          const n = Math.round(m[sa][sb] * wa * wb);
-          if (n <= 0) { continue; }
-          /* a === b et non sa === sb : une course JFK → LaGuardia part bien
-             d'un nœud pour un autre, alors qu'elle reste dans le secteur. */
-          if (a === b) {
-            for (let k = 0; k < n; k++) {
-              const p = pick(a);
-              rp.push(p[0], p[1], REST);
-            }
-            continue;
-          }
-          arcs.push({ a: a, b: b, n: n });
-          const na = Math.max(1, Math.min(MAX_AXIS, Math.round(n / PER_AXIS)));
-          const ax = axesFor(a, b, na);
-          for (const q of ax) {
-            AXES.push({ s: [q[0][0], q[0][1], ALT],
-                        t: [q[1][0], q[1][1], ALT] });
-          }
-          for (let k = 0; k < n; k++) {
-            const q = ax[(Math.random() * na) | 0];
-            const j = (Math.random() - 0.5) * 2 * JITTER;
-            const P = pick(a), Q = pick(b);
-            const x1 = q[0][0] + q[2][0] * j, y1 = q[0][1] + q[2][1] * j;
-            const x2 = q[1][0] + q[2][0] * j, y2 = q[1][1] + q[2][1] * j;
-            const L = Math.hypot((x1 - P[0]) * KLAT, y1 - P[1])
-                    + Math.hypot((x2 - x1) * KLAT, y2 - y1)
-                    + Math.hypot((Q[0] - x2) * KLAT, Q[1] - y2) || 0.01;
-            o.push(P[0], P[1]); e1.push(x1, y1); e2.push(x2, y2);
-            d.push(Q[0], Q[1]);
-            inv.push(SPEED / L); ph.push(Math.random());
-          }
-        }
-      }
+  SECNAME = secNames();
+  if (!canFocus(FOCUS)) {
+    for (let s = 0; s < SECNAME.length; s++) {
+      if (canFocus(s)) { FOCUS = s; break; }
     }
   }
+  const around = timesAround(SECNAME[FOCUS]);
+  const dests = (AIRSEC >= 0 ? SECTORS.concat([AIRSEC]) : SECTORS)
+    .filter(s => {
+      const d = around[SECNAME[s]];
+      return s !== FOCUS && d && d.ab && d.ba && d.ab.trips > 0.5;
+    });
   LABEL_POS = labelSpots();
-  ARCS = arcTop(arcs);
-  const nm = inv.length, nr = rp.length / 3;
-  MOV = { n: nm, pos: new Float32Array(nm * 3), ang: new Float32Array(nm),
-          o: new Float32Array(o), e1: new Float32Array(e1),
-          e2: new Float32Array(e2), d: new Float32Array(d),
-          inv: new Float32Array(inv), ph: new Float32Array(ph) };
-  const ra = new Float32Array(nr);
-  for (let i = 0; i < nr; i++) { ra[i] = Math.random() * 360; }
-  SIT = { n: nr, pos: new Float32Array(rp), ang: ra };
-  STATIC = staticLayers();
-  sayCount(nm + nr);
+  /* La voiture garde sa place sur sa voie d'un pas à l'autre : la remettre
+     au tirage à chaque changement de pas faisait sauter les quatorze
+     voitures en même temps, une fois par seconde et demie. */
+  const was = {};
+  for (const r of ROUTES) { was[r.s] = [r.ab.p, r.ba.p]; }
+  const A = nodeAt(mainNode(FOCUS));
+  ROUTES = dests.map(s => {
+    const B = nodeAt(mainNode(s));
+    const pa = lanePath(A, B, 1);
+    /* Le retour parcourt sa voie dans l'autre sens : on la retourne, et la
+       voiture part donc de l'arrivée. */
+    const pb = lanePath(A, B, -1).reverse();
+    const k = was[s] || [Math.random(), Math.random()];
+    return {
+      s: s, name: SECNAME[s], end: pillSpot(B),
+      ab: { path: pa, cum: cumLen(pa), p: k[0], min: 0, w: 2, c: [128, 128, 128] },
+      ba: { path: pb, cum: cumLen(pb), p: k[1], min: 0, w: 2, c: [128, 128, 128] },
+    };
+  });
+  SIG = "";
+  refresh(true);
 }
 
-/* Le compte des taxis à l'écran, et ce qu'un taxi vaut.
+/* Ce qui glisse : les durées, les couleurs, l'isochrone. La géométrie ne
+   bouge pas, donc elle n'est pas refaite.
 
-   Sans le nombre, on ne sait pas si la ville s'est vidée ou si le cadrage a
-   changé, et on ne peut pas comparer deux pas de mémoire.
-
-   La clé est posée sur la carte, dans la bande des couleurs de secteurs, et
-   non sous le titre. Une clé de carte se lit en regardant la carte : à côté
-   du titre, il fallait quitter l'image pour savoir ce qu'on regardait, et le
-   titre grandissait d'une ligne.
-
-   Un taxi vaut une course, et c'est le compte qui est dit en premier : ce
-   qu'on veut savoir est combien de courses la ville fait à cette heure, et
-   l'équivalence vient après, pour expliquer ce qu'on voit bouger.
-
-   La ligne a dit « un taxi = une course par heure », ce qui ne se comprenait
-   pas : « par heure » qualifie le compte, pas le taxi. Elle a ensuite compté
-   les voitures en circulation — courses de l'heure fois durée du trajet — ce
-   qui était juste mais répondait à une question que personne ne posait, et
-   enlevait du monde à l'écran. Le compte des courses est la donnée ; la
-   voiture n'est que le marqueur qui la porte. */
-function cabKey() {
-  const el = document.getElementById("legend");
-  if (!el || !CFG.legend) { return null; }
-  let k = el.querySelector("#cabkey");
-  if (!k) {
-    k = document.createElement("span");
-    k.id = "cabkey";
-    k.style.fontWeight = "600";
-    el.insertBefore(k, el.firstChild);
-  }
-  return k;
-}
-function sayCount(n) {
-  const k = cabKey();
-  if (!k) { return; }
-  k.textContent = FR(n) + " courses dans l'heure · un taxi = une course";
-}
-
-/* Trois segments : décollage vers l'axe, traversée à altitude constante,
-   dispersion vers le point d'arrivée. L'altitude suit, sinon les taxis
-   coupaient à travers les tours au départ et à l'arrivée. */
-function advance(t) {
-  const P = MOV.pos, O = MOV.o, A = MOV.e1, B = MOV.e2, D = MOV.d;
-  const I = MOV.inv, H = MOV.ph, G = MOV.ang, DEG = 180 / Math.PI;
-  for (let i = 0; i < MOV.n; i++) {
-    let u = H[i] + t * I[i];
-    u -= Math.floor(u);
-    const j = 2 * i, k = 3 * i;
-    if (u < IN) {
-      const v = u / IN;
-      P[k] = O[j] + (A[j] - O[j]) * v;
-      P[k + 1] = O[j + 1] + (A[j + 1] - O[j + 1]) * v;
-      P[k + 2] = REST + (ALT - REST) * v;
-      G[i] = Math.atan2(A[j + 1] - O[j + 1], (A[j] - O[j]) * KLAT) * DEG;
-    } else if (u < OUT) {
-      const v = (u - IN) / (OUT - IN);
-      P[k] = A[j] + (B[j] - A[j]) * v;
-      P[k + 1] = A[j + 1] + (B[j + 1] - A[j + 1]) * v;
-      P[k + 2] = ALT;
-      G[i] = Math.atan2(B[j + 1] - A[j + 1], (B[j] - A[j]) * KLAT) * DEG;
-    } else {
-      const v = (u - OUT) / (1 - OUT);
-      P[k] = B[j] + (D[j] - B[j]) * v;
-      P[k + 1] = B[j + 1] + (D[j + 1] - B[j + 1]) * v;
-      P[k + 2] = ALT + (REST - ALT) * v;
-      G[i] = Math.atan2(D[j + 1] - B[j + 1], (D[j] - B[j]) * KLAT) * DEG;
+   Les couches ne sont reconstruites que lorsque l'image changerait
+   vraiment : une minute entière de plus, ou un cran de couleur sur
+   quarante. Les refaire à chaque trame retaillerait quatorze étiquettes
+   soixante fois par seconde pour un dessin identique. */
+function refresh(force) {
+  if (!ROUTES.length) { return; }
+  const around = timesAround(SECNAME[FOCUS]);
+  let mn = Infinity, mx = 0, vmax = 0;
+  for (const r of ROUTES) {
+    const d = around[r.name];
+    if (!d || !d.ab || !d.ba) { continue; }
+    for (const k of ["ab", "ba"]) {
+      if (d[k].min < mn) { mn = d[k].min; }
+      if (d[k].min > mx) { mx = d[k].min; }
+      if (d[k].trips > vmax) { vmax = d[k].trips; }
     }
   }
+  TMIN = isFinite(mn) ? mn : 0;
+  TMAX = mx > TMIN ? mx : TMIN + 1;
+  BAND = {};
+  let sig = SECNAME[FOCUS] + "|";
+  for (const r of ROUTES) {
+    const d = around[r.name];
+    if (!d || !d.ab || !d.ba) { continue; }
+    for (const k of ["ab", "ba"]) {
+      const u = (d[k].min - TMIN) / (TMAX - TMIN);
+      r[k].min = d[k].min;
+      r[k].c = ramp(u);
+      /* L'épaisseur suit la racine du volume : une liaison dix fois plus
+         forte est trois fois plus épaisse, ce qui est la règle d'un tracé
+         de flux — l'oeil compare des surfaces, pas des largeurs. */
+      r[k].w = 1.7 + 3.1 * Math.sqrt(d[k].trips / (vmax || 1));
+      sig += Math.round(d[k].min) + "," + Math.round(u * 40) + ";";
+    }
+    BAND[r.s] = (d.ab.min - TMIN) / (TMAX - TMIN);
+  }
+  if (!force && sig === SIG) { return; }
+  SIG = sig;
+  STATIC = staticLayers();
+  timeKey();
 }
 
+/* Changer de secteur de départ au survol. Un clic serait un geste de plus
+   pour la même chose, et une carte de temps de trajet se promène : on passe
+   sur Brooklyn pour voir ce que Brooklyn voit.
+
+   Sortir de la ville ne remet rien à zéro — la carte garde le dernier
+   secteur touché, ce qui est ce qu'on veut en lâchant la souris. */
+function setFocus(s) {
+  if (!(s >= 0) || s === FOCUS || !canFocus(s)) { return; }
+  FOCUS = s;
+  build();
+}
+
+/* Les lumières de la ville. Elles ne portent aucune donnée, et c'est dit
+   ici une fois pour toutes : comme les tours elles-mêmes, elles situent.
+   Aucun nombre ne s'y lit, aucune ne s'allume ni ne s'éteint avec le pas.
+
+   Elles sont là parce que la carte les a perdues. La nuée de taxis posés
+   semait des points chauds entre les tours, et c'est elle qui faisait la
+   ville de nuit ; en la retirant avec les flux, on a éteint la maquette.
+   Le ruban d'à côté allume ses façades et pose un feu rouge au sommet des
+   plus hautes : les deux blocs se répondent.
+
+   Tirées une fois au chargement. Un tirage par image ferait scintiller la
+   ville entière, ce qui est le défaut de toutes les maquettes nocturnes. */
+function cityLights() {
+  const roof = [], beacon = [], street = [];
+  for (const d of CITY.bld) {
+    const H = d.h * EXAG;
+    let cx = 0, cy = 0;
+    for (const q of d.p) { cx += q[0]; cy += q[1]; }
+    cx /= d.p.length; cy /= d.p.length;
+    /* Deux à quatre lumières par toit selon la taille de l'emprise, posées
+       six unités au-dessus : à la hauteur exacte du toit elles entraient en
+       conflit de profondeur avec lui et clignotaient. */
+    const n = d.h > 160 ? 3 : d.h > 95 ? 2 : 1;
+    for (let k = 0; k < n; k++) {
+      const a = d.p[(Math.random() * d.p.length) | 0];
+      const v = 0.25 + 0.6 * Math.random();
+      roof.push({ p: [cx + (a[0] - cx) * v, cy + (a[1] - cy) * v, H + 6],
+                  a: 62 + 96 * Math.random() });
+    }
+    /* Le feu d'obstacle, sur les quatre-vingt-quatorze tours de plus de
+       deux cents pieds. Même rouge que celui du ruban. */
+    if (d.h > 200) { beacon.push({ p: [cx, cy, H + 22] }); }
+  }
+  /* Les lumières de rue, tirées dans les réservoirs de points des secteurs
+     — ceux-là mêmes où les taxis se posaient. C'est ce qui remplit le vide
+     entre les tours, et sans quoi seuls les toits brillent. */
+  const b = CITY.pools.b, sc = CITY.pools.sc;
+  for (const flat of CITY.pools.pt) {
+    const n = flat.length / 2;
+    for (let k = 0; k < Math.min(55, n); k++) {
+      const i = (Math.random() * n) | 0;
+      street.push({ p: [b[0] + flat[2 * i] / sc, b[1] + flat[2 * i + 1] / sc,
+                        REST],
+                    a: 46 + 62 * Math.random() });
+    }
+  }
+  return { roof: roof, beacon: beacon, street: street };
+}
+
+/* La clé de la carte, posée dans la bande du bas.
+
+   Elle remplace la légende des couleurs de secteurs, qui serait devenue
+   fausse : le sol ne porte plus la couleur des secteurs, il porte celle du
+   temps. Une légende qui nomme neuf teintes que la carte n'emploie plus
+   est pire que pas de légende.
+
+   Une clé de carte se lit en regardant la carte, d'où sa place ici et non
+   sous le titre : à côté du titre, il fallait quitter l'image pour savoir
+   ce qu'on regardait.
+
+   Elle dit trois choses, dans cet ordre : d'où l'on part, ce que les
+   couleurs valent en minutes, et comment changer de départ. */
+function timeKey() {
+  const el = document.getElementById("legend");
+  if (!el || !CFG.legend) { return; }
+  const st = CFG.ramp;
+  el.innerHTML =
+    '<span style="font-weight:600">Depuis ' + SECNAME[FOCUS] + '</span>'
+    + '<span><i style="width:72px;height:7px;border-radius:2px;'
+    + 'background:linear-gradient(90deg,' + st[0] + ',' + st[1] + ','
+    + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
+    + ' min, médiane du pas</span>'
+    + '<span style="opacity:.78">→ aller · ← retour · survolez une zone'
+    + ' pour partir d\'ailleurs</span>';
+  el.style.color = (CFG.head && CFG.head.dim) || C.dim;
+  /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
+     légende des secteurs en prenait deux, et les pastilles qui se rangent
+     au-dessus d'elle gagnent ces pixels. */
+  LEGH = el.offsetHeight + 8;
+}
+
+/* Les voitures avancent d'une fraction d'itinéraire par trame, et non
+   d'une position calculée sur l'horloge : la durée change d'un pas à
+   l'autre, et une position déduite du temps absolu ferait sauter la voiture
+   en arrière à chaque changement de pas.
+
+   Le temps mis à parcourir l'itinéraire est proportionnel au temps de
+   trajet mesuré, étalon commun au bloc. Ce n'est donc pas la vitesse de la
+   course qui est montrée — un itinéraire court franchi en peu de temps
+   paraît lent — mais sa durée, qui est la donnée. */
+function rideAdvance(dt) {
+  const all = lanes();
+  const n = all.length;
+  if (!n) { RIDE = null; return; }
+  const pos = new Float32Array(n * 3), ang = new Float32Array(n);
+  const DEG = 180 / Math.PI;
+  for (let k = 0; k < n; k++) {
+    const d = all[k];
+    const ms = Math.max(600, (d.min / TMAX) * ETALON_MS);
+    d.p += dt / ms;
+    while (d.p >= 1) { d.p -= 1; }
+    const total = d.cum[d.cum.length - 1] || 1;
+    const want = d.p * total;
+    let j = 1;
+    while (j < d.cum.length - 1 && d.cum[j] < want) { j++; }
+    const seg = (d.cum[j] - d.cum[j - 1]) || 1;
+    const v = (want - d.cum[j - 1]) / seg;
+    const a = d.path[j - 1], b = d.path[j];
+    pos[3 * k] = a[0] + (b[0] - a[0]) * v;
+    pos[3 * k + 1] = a[1] + (b[1] - a[1]) * v;
+    pos[3 * k + 2] = ROAD_Z + 24;
+    ang[k] = Math.atan2(b[1] - a[1], (b[0] - a[0]) * KLAT) * DEG;
+  }
+  RIDE = { n: n, pos: pos, ang: ang };
+}
 /* Les étiquettes sont ramenées dans le cadre en pixels, pas en degrés : la
    vue est tournée de 29 degrés, si bien qu'une borne en longitude ne
    correspond à aucun bord de l'écran et le nom de Brooklyn sortait quand
    même. On projette, on borne, on reprojette. */
+function clampedTo(g, z, padX, padTop, padBot) {
+  const el = document.getElementById("city");
+  const W = el.clientWidth || 600, H = el.clientHeight || 400;
+  if (!VIEWSTATE || !deck.WebMercatorViewport) { return g; }
+  const vp = new deck.WebMercatorViewport(
+    Object.assign({ width: W, height: H }, VIEWSTATE));
+  /* Le repère est posé en altitude : sa place à l'écran n'est pas celle du
+     sol sous lui. On borne la position affichée, puis on retire ce décalage
+     pour retrouver le point de sol à donner à la couche. */
+  const p0 = vp.project([g[0], g[1], 0]);
+  const p1 = vp.project([g[0], g[1], z]);
+  const x = Math.min(W - padX, Math.max(padX, p1[0]));
+  const y = Math.min(padBot, Math.max(padTop, p1[1]));
+  return vp.unproject([x - (p1[0] - p0[0]), y - (p1[1] - p0[1])]);
+}
+
 function labelSpots() {
   const el = document.getElementById("city");
   const W = el.clientWidth || 600, H = el.clientHeight || 400;
   if (!VIEWSTATE || !deck.WebMercatorViewport) {
     return SECTORS.map(a => CITY.lonlat[a]);
   }
-  const vp = new deck.WebMercatorViewport(
-    Object.assign({ width: W, height: H }, VIEWSTATE));
   const padX = Math.min(64, W * 0.14), padY = Math.min(28, H * 0.07);
-  /* Le nom est posé en altitude : sa place à l'écran n'est pas celle du sol
-     sous lui. On borne la position affichée, puis on retire ce décalage pour
-     retrouver le point de sol à donner à la couche. */
-  const z = ALT + 340;
-  return SECTORS.map(a => {
-    const g = CITY.lonlat[a];
-    const p0 = vp.project([g[0], g[1], 0]);
-    const p1 = vp.project([g[0], g[1], z]);
-    const x = Math.min(W - padX, Math.max(padX, p1[0]));
-    const y = Math.min(H - padY, Math.max(padY, p1[1]));
-    return vp.unproject([x - (p1[0] - p0[0]), y - (p1[1] - p0[1])]);
+  return SECTORS.map(
+    a => clampedTo(CITY.lonlat[a], ALT + 340, padX, padY, H - padY));
+}
+
+/* La pastille des minutes, ramenée dans le cadre.
+
+   Brooklyn et les aéroports ont leur centre hors champ : leur pastille
+   tombait sous le bord inférieur, et deux trajets sur sept n'affichaient
+   plus leur durée. Le tracé, lui, garde son vrai bout et sort du cadre —
+   une route qui quitte l'écran est juste, une durée invisible ne l'est pas.
+
+   Le bas réserve la hauteur de la clé : une pastille posée dessus la
+   rendait illisible. */
+function pillSpot(g) {
+  const el = document.getElementById("city");
+  const W = el.clientWidth || 600, H = el.clientHeight || 400;
+  const padX = Math.min(52, W * 0.09);
+  /* Le bas réserve la clé plus la hauteur des deux pastilles empilées :
+     à vingt-six pixels, celle du retour passait par-dessus la clé. */
+  return clampedTo(g, ROAD_Z + 54, padX, HEAD + 14, H - LEGH - 48);
+}
+
+/* La pastille des minutes, une par sens, posée à l'arrivée.
+
+   C'est le seul nombre écrit sur la carte, et il est écrit là où l'on
+   arrive : le temps de trajet est une propriété de la destination, pas du
+   tracé. L'aller au-dessus, le retour en dessous, et une flèche devant
+   chacun — sans elle, deux nombres empilés sans raison apparente.
+
+   Le liseré de la pastille reprend la couleur de sa voie, ce qui rattache
+   le nombre à son trait quand deux pastilles se touchent. */
+function timePill(id, way, glyph, dy) {
+  return new deck.TextLayer({
+    id: id, data: ROUTES, pickable: false,
+    getPosition: d => [d.end[0], d.end[1], ROAD_Z + 54],
+    getText: d => glyph + Math.round(d[way].min) + " min",
+    getSize: 10.5, sizeUnits: "pixels",
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
+    fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
+    /* L'atlas de caractères de deck.gl s'arrête à l'ASCII : la flèche n'y
+       était pas, et c'est l'étiquette entière qui tombait — sept pastilles
+       vides à bordure colorée. « auto » le construit sur le texte réel. */
+    characterSet: "auto",
+    background: true, backgroundPadding: [6, 3, 6, 3],
+    getBackgroundColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 234],
+    getBorderColor: d => {
+      const c = d[way].c;
+      return [c[0], c[1], c[2], 255];
+    },
+    getBorderWidth: 1.2,
+    getColor: NIGHT ? [238, 235, 246, 255] : [38, 36, 50, 255],
+    getPixelOffset: [0, dy],
+    parameters: { depthTest: false },
   });
 }
 
@@ -4503,13 +4795,18 @@ function staticLayers() {
   const out = [];
   out.push(new deck.PolygonLayer({
     id: "ground", data: CITY.polys, extruded: false, filled: true,
-    stroked: false, pickable: false,
+    stroked: false, pickable: true,
+    /* C'est le sol qui reçoit le survol, et non les tours : les tours ne
+       sont pas pickable, donc le pointeur traverse la ville et touche la
+       zone qui est dessous. */
+    onHover: info => setFocus(info && info.object ? info.object.s : -1),
     getPolygon: d => d.p,
-    /* Le sol porte la couleur du nœud correspondant dans le ruban, assez
-       franchement pour qu'on fasse le rapprochement : un bloc dit quelles
-       liaisons, l'autre où elles tombent, et c'est la couleur qui les relie.
-       Elle reste sous le jaune des taxis, qui est la donnée en mouvement. */
-    getFillColor: d => [TINT[d.s][0], TINT[d.s][1], TINT[d.s][2], 58],
+    getFillColor: d => groundOf(d.s),
+    /* Le sol est la seule couche dont les données ne changent pas d'un pas
+       à l'autre — ce sont les mêmes polygones. deck.gl ne relit donc pas
+       ses couleurs tout seul : sans ce déclencheur, l'isochrone restait
+       celle du premier pas et du premier secteur de départ. */
+    updateTriggers: { getFillColor: [SIG] },
   }));
   out.push(new deck.PolygonLayer({
     id: "buildings", data: CITY.bld, extruded: true, filled: true,
@@ -4527,32 +4824,70 @@ function staticLayers() {
     material: { ambient: 0.70, diffuse: 0.62, shininess: 10,
                 specularColor: [30, 28, 38] },
   }));
-  out.push(new deck.LineLayer({
-    id: "axes", data: AXES,
-    getSourcePosition: d => d.s, getTargetPosition: d => d.t,
-    getColor: NIGHT ? [160, 156, 182, 20] : [118, 114, 140, 20], getWidth: 1,
-  }));
-  /* Les flux de secteur à secteur, en arcs. La maquette montrait les courses
-     une par une, en voitures, et une voiture ne dit rien d'une liaison : il
-     en faut cent pour voir un courant, et à cent voitures on ne voit plus
-     lesquelles vont ensemble. L'arc dit la liaison, la voiture dit la course,
-     et les deux sont la même donnée à deux échelles.
-
-     L'arc part du secteur de départ et prend sa couleur : un flux a un sens,
-     et c'est l'origine qui le donne. */
-  out.push(new deck.ArcLayer({
-    id: "flux", data: ARCS, pickable: false,
-    getSourcePosition: d => d.s, getTargetPosition: d => d.t,
-    getSourceColor: d => [d.c[0], d.c[1], d.c[2], NIGHT ? 150 : 130],
-    getTargetColor: d => [d.c[0], d.c[1], d.c[2], NIGHT ? 36 : 30],
-    getWidth: d => d.w, widthUnits: "pixels",
-    /* À plat. Une hauteur d'arc faisait voûter les liaisons au-dessus de la
-       ville, et ces voûtes se lisaient comme des trajectoires de courses,
-       qui sont au sol. Une liaison n'est pas un trajet : c'est une quantité
-       entre deux endroits, et elle se tient sur la carte. */
-    getHeight: 0, greatCircle: false,
+  /* Les lumières de la ville, posées sur la maquette et pas sur la donnée.
+     Elles ne s'allument qu'à la nuit : de jour, un point chaud sur un toit
+     clair est une salissure. */
+  if (NIGHT && LIGHTS) {
+    out.push(new deck.ScatterplotLayer({
+      id: "street", data: LIGHTS.street, pickable: false,
+      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 0.9,
+      stroked: false, filled: true,
+      getFillColor: d => [255, 198, 116, d.a],
+    }));
+    out.push(new deck.ScatterplotLayer({
+      id: "roof", data: LIGHTS.roof, pickable: false,
+      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 1.05,
+      stroked: false, filled: true,
+      getFillColor: d => [255, 210, 138, d.a],
+    }));
+    out.push(new deck.ScatterplotLayer({
+      id: "beacon", data: LIGHTS.beacon, pickable: false,
+      getPosition: d => d.p, radiusUnits: "pixels", getRadius: 1.6,
+      stroked: false, filled: true,
+      getFillColor: [226, 96, 74, 215],
+    }));
+  }
+  /* Un itinéraire se dessine en deux couches : le liseré sombre, large, et
+     le tracé coloré, fin, par-dessus. C'est la recette de tous les GPS, et
+     deck.gl n'a pas de propriété pour la faire d'un coup. Sans le liseré,
+     un tracé vert posé sur un toit clair disparaît, et deux itinéraires
+     qui se croisent se confondent. */
+  out.push(new deck.PathLayer({
+    id: "route-case", data: lanes(), pickable: false,
+    getPath: d => d.path,
+    getColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 214],
+    getWidth: d => d.w + 3.6, widthUnits: "pixels",
+    capRounded: true, jointRounded: true,
     parameters: { depthTest: false },
   }));
+  out.push(new deck.PathLayer({
+    id: "route", data: lanes(), pickable: false,
+    getPath: d => d.path,
+    getColor: d => [d.c[0], d.c[1], d.c[2], 250],
+    getWidth: d => d.w, widthUnits: "pixels",
+    capRounded: true, jointRounded: true,
+    parameters: { depthTest: false },
+  }));
+  /* Le point de départ, à la manière d'un GPS : un disque et son anneau.
+     Sans lui, on ne sait pas d'où partent les huit itinéraires. Il prend le
+     jaune du taxi, qui est la couleur de ce qui nous concerne. */
+  out.push(new deck.ScatterplotLayer({
+    id: "focus", data: [nodeAt(mainNode(FOCUS))], pickable: false,
+    getPosition: d => [d[0], d[1], ROAD_Z + 18],
+    radiusUnits: "pixels", getRadius: 6.4,
+    stroked: true, filled: true, lineWidthUnits: "pixels",
+    getLineWidth: 3.2,
+    getFillColor: rgb(C.accent).concat([255]),
+    getLineColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 238],
+    parameters: { depthTest: false },
+  }));
+  /* La pastille des minutes, posée à l'arrivée. C'est le seul nombre écrit
+     sur la carte, et il est écrit là où l'on arrive : le temps de trajet
+     est une propriété de la destination, pas du tracé. Le liseré de la
+     pastille reprend la couleur de son itinéraire, ce qui rattache le
+     nombre à son trait quand deux pastilles se touchent. */
+  out.push(timePill("route-time-ab", "ab", "→ ", 11));
+  out.push(timePill("route-time-ba", "ba", "← ", 29));
   /* Sans depthTest coupé, les tours mangeaient la première lettre : le texte
      passait derrière une façade plus haute que son altitude. */
   out.push(new deck.TextLayer({
@@ -4599,23 +4934,35 @@ function staticLayers() {
 
 function layers() {
   const out = STATIC.slice();
-  /* billboard: false pose la voiture à plat sur le plan du sol : elle tourne
-     avec la carte au lieu de rester face à l'écran, et son cap se lit. */
-  out.push(new deck.IconLayer({
-    id: "sit", iconAtlas: ATLAS, iconMapping: MAPPING,
-    data: { length: SIT.n,
-            attributes: { getPosition: { value: SIT.pos, size: 3 },
-                          getAngle: { value: SIT.ang, size: 1 } } },
-    getIcon: () => "taxi", sizeUnits: "pixels", getSize: TAXI_PX * 0.78,
-    billboard: false, opacity: 0.62,
+  if (!RIDE) { return out; }
+  /* Une voiture par itinéraire, et non plus une par course. La nuée disait
+     le volume, que le Sankey dit déjà ; la voiture unique dit la durée, par
+     le temps qu'elle met à faire son tracé.
+
+     billboard: false la pose à plat sur le plan du sol : elle tourne avec
+     la carte au lieu de rester face à l'écran, et son cap se lit. */
+  /* Un jeton sombre sous la voiture. Sans lui, un taxi jaune posé sur une
+     route orange disparaît : c'est la même famille de couleur, et la
+     voiture faisait un épaississement du trait au lieu d'un véhicule. Le
+     jeton creuse la route, comme le curseur d'un GPS. */
+  out.push(new deck.ScatterplotLayer({
+    id: "ride-puck", pickable: false,
+    data: { length: RIDE.n,
+            attributes: { getPosition: { value: RIDE.pos, size: 3 } } },
+    radiusUnits: "pixels", getRadius: TAXI_PX * 0.6,
+    stroked: true, filled: true, lineWidthUnits: "pixels",
+    getLineWidth: 1.4,
+    getFillColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 236],
+    getLineColor: [LIFT[0], LIFT[1], LIFT[2], 180],
+    parameters: { depthTest: false },
   }));
   out.push(new deck.IconLayer({
-    id: "mov", iconAtlas: ATLAS, iconMapping: MAPPING,
-    data: { length: MOV.n,
-            attributes: { getPosition: { value: MOV.pos, size: 3 },
-                          getAngle: { value: MOV.ang, size: 1 } } },
+    id: "ride", iconAtlas: ATLAS, iconMapping: MAPPING,
+    data: { length: RIDE.n,
+            attributes: { getPosition: { value: RIDE.pos, size: 3 },
+                          getAngle: { value: RIDE.ang, size: 1 } } },
     getIcon: () => "taxi", sizeUnits: "pixels", getSize: TAXI_PX,
-    billboard: false,
+    billboard: false, parameters: { depthTest: false },
   }));
   return out;
 }
@@ -4664,14 +5011,6 @@ const SHORT = ["Downtown", "Midtown", "Uptown", "Harlem", "Queens",
 
 async function boot() {
   CITY = await (await fetch(staticBase() + "nyc_city.json")).json();
-  POOL = CITY.pools.pt.map(flat => {
-    const a = new Array(flat.length / 2);
-    for (let i = 0; i < a.length; i++) {
-      a[i] = [CITY.pools.b[0] + flat[2 * i] / CITY.pools.sc,
-              CITY.pools.b[1] + flat[2 * i + 1] / CITY.pools.sc];
-    }
-    return a;
-  });
   TINT = CITY.order.map(name => {
     const c = rgb(META.areaColors[name] || C.dim);
     return [SLAB[0] + (c[0] - SLAB[0]) * MUTE,
@@ -4692,6 +5031,7 @@ async function boot() {
     AIRNODE = CITY.air.node;
   }
   fatten();
+  LIGHTS = cityLights();
   deckgl = new deck.DeckGL({
     container: "city",
     initialViewState: fitted(),
@@ -4725,14 +5065,18 @@ async function boot() {
 function onState() { if (CITY) { build(); } }
 
 function frame(now) {
-  if (deckgl && MOV) {
-    if (!started) { started = now || 0; }
-    advance(((now || 0) - started) / 1000);
+  if (deckgl && ROUTES.length) {
+    const t = now || 0;
+    const dt = started ? Math.min(90, t - started) : 16;
+    started = t;
+    refresh(false);
+    rideAdvance(dt);
     deckgl.setProps({ layers: layers() });
   }
   requestAnimationFrame(frame);
 }
 </script>
+
 """
 
 
