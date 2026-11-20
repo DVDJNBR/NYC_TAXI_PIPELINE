@@ -528,16 +528,26 @@ def kpis(height: int = 160) -> None:
 VIEW = {"pitch": 50, "bearing": -18}
 
 
-# L'ambre du milieu de la rampe du trafic. Elle n'est pas un mélange des deux
-# bouts : interpoler le vert de BETTER vers le rouge de WORSE passe par un
-# brun qui ne dit ni l'un ni l'autre. Elle n'est pas non plus le jaune du
-# taxi, qui est déjà pris par le point qui roule sur la bande.
-_AMBER = {"dark": "#c98b3c", "light": "#b07424"}
+# L'échelle des durées. Un seul bleu, du plus clair au plus sombre, et non
+# le vert-ambre-rouge des autres blocs.
+#
+# Le feu tricolore dit un jugement : vert bon, rouge mauvais. Une durée de
+# trajet n'est ni bonne ni mauvaise — trente minutes pour aller à JFK n'est
+# pas une faute, c'est une distance. Une teinte unique qui s'assombrit dit
+# ce qu'il faut : plus c'est foncé, plus c'est loin en temps.
+#
+# Le bleu et pas une autre teinte : la ville est brune et grise, le taxi est
+# jaune, et le bleu est le seul froid qui ne touche à rien de ce qui est
+# déjà pris. Le violet était le candidat suivant ; il tire vers le gris de
+# la maquette dès qu'on le désature.
+_TIME_RAMP = {
+    "dark": ["#a8d8f0", "#4e92c8", "#1f4f86"],
+    "light": ["#8fc1e3", "#3b7fb5", "#123f72"],
+}
 
 
 def _ramp() -> list:
-    p = nyc_theme.palette()
-    return [p["BETTER"], _AMBER[nyc_theme.mode()], p["WORSE"]]
+    return list(_TIME_RAMP[nyc_theme.mode()])
 
 
 def city_map(height: int = 460, title: str = "", hint: str = "") -> None:
@@ -4215,15 +4225,15 @@ const ROAD_Z = 150;
    tous à la fois et la carte devenait agitée. Ce qui porte la donnée est
    le rapport des vitesses entre deux voies, pas la vitesse elle-même, et
    ce rapport se lit mieux au pas du ruban qu'à celui d'un jeu. */
-const ETALON_MS = 6200;
+const ETALON_MS = 9000;
 const ROUTE_N = 32;           /* points par voie                           */
 /* Écart des deux voies de part et d'autre de l'itinéraire, en degrés et
    non en part de la distance : les deux chaussées se touchent, comme sur
    un plan routier, au lieu de s'écarter d'autant plus que le trajet est
    long. À ce cadrage un degré vaut environ mille neuf cents pixels, donc
-   les deux voies sont séparées de deux pixels et demi : leurs liserés se
+   les deux voies sont séparées de moins de deux pixels : leurs liserés se
    recouvrent et la liaison ne montre qu'une bande. */
-const LANE = 0.0013;
+const LANE = 0.0009;
 
 /* Distance d'une pastille à sa voie, en part de la longueur du trajet. Les
    minutes se lisent à côté du trait qu'elles décrivent, et non au bout :
@@ -4234,10 +4244,12 @@ const PILL_OFF = 0.11, PILL_AT = 0.62;
    de la vue : à cinquante-quatre degrés, un triangle de neuf pixels n'en
    fait plus que cinq de haut et disparaît sur son trait. */
 const ARROW_PX = 17;
-/* Une flèche tous les tant de degrés : la densité du train est la même sur
-   un trajet court et sur un long, donc ce qui distingue les deux est la
-   vitesse, qui est la donnée. */
-const ARROW_EVERY = 0.0092;
+/* Un triangle tous les tant de degrés : la densité du train est la même
+   sur un trajet court et sur un long, donc ce qui distingue les deux est la
+   vitesse, qui est la donnée. La valeur est celle qui rend les triangles
+   jointifs au cadrage du cockpit : à dix-sept pixels de côté d'icône, le
+   triangle peint en fait douze, et un degré en vaut mille neuf cents. */
+const ARROW_EVERY = 0.0063;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 /* Les sept secteurs dessinés. Staten Island en est absent — six courses par
@@ -4401,11 +4413,36 @@ function timesAround(name) {
 /* Un secteur peut-il servir de départ. Staten Island n'en est pas : six
    courses par jour, et ses rares liaisons portent des durées de deux heures
    et demie qui écraseraient toute l'échelle. */
-function canFocus(s) {
-  const name = SECNAME[s] || "";
-  let k = 0;
+/* Le volume de chaque liaison d'un secteur sur tout le cycle, dans les
+   deux sens.
+
+   Les destinations dessinées en sortent, et non du pas courant : le Bronx
+   compte six liaisons sur la journée mais neuf courses dans son heure la
+   plus forte, donc un filtre au pas en effaçait cinq sur six et la carte
+   donnait à lire un secteur qui ne parle qu'à Harlem. La géographie d'un
+   secteur ne change pas d'une heure à l'autre ; ce qui change est le
+   volume, et c'est la largeur du trait qui le porte. */
+function linkVolumes(name) {
+  const tot = {};
   for (const f of META.flows[S.scope] || []) {
-    if (f.m && f.s === name && f.t !== name && f.v[S.step] > 0.5) { k++; }
+    if (!f.m) { continue; }
+    const away = f.s === name && f.t !== name;
+    const back = f.t === name && f.s !== name;
+    if (!away && !back) { continue; }
+    const key = away ? f.t : f.s;
+    const o = tot[key] || (tot[key] = { ab: 0, ba: 0 });
+    let sum = 0;
+    for (const v of f.v) { sum += v; }
+    o[away ? "ab" : "ba"] = sum;
+  }
+  return tot;
+}
+
+function canFocus(s) {
+  const vol = linkVolumes(SECNAME[s] || "");
+  let k = 0;
+  for (const key in vol) {
+    if (vol[key].ab >= 1 && vol[key].ba >= 1) { k++; }
   }
   return k >= 3;
 }
@@ -4531,10 +4568,12 @@ function build() {
     }
   }
   const around = timesAround(SECNAME[FOCUS]);
+  const vol = linkVolumes(SECNAME[FOCUS]);
   const dests = (AIRSEC >= 0 ? SECTORS.concat([AIRSEC]) : SECTORS)
     .filter(s => {
-      const d = around[SECNAME[s]];
-      return s !== FOCUS && d && d.ab && d.ba && d.ab.trips > 0.5;
+      const d = around[SECNAME[s]], t = vol[SECNAME[s]];
+      return s !== FOCUS && d && d.ab && d.ba
+             && t && t.ab >= 1 && t.ba >= 1;
     });
   LABEL_POS = labelSpots();
   /* La voiture garde sa place sur sa voie d'un pas à l'autre : la remettre
@@ -4555,9 +4594,11 @@ function build() {
       /* Les deux trains partent en quinconce : partis ensemble, leurs
          flèches se faisaient face au milieu de la bande. */
       ab: { path: pa, cum: cumLen(pa), p: k[0], min: 0, w: 2,
-            c: [128, 128, 128], at: pillSpot(A, B, 1) },
+            c: [128, 128, 128], at: pillSpot(A, B, 1),
+            tie: tiePoint(pa) },
       ba: { path: pb, cum: cumLen(pb), p: (k[1] + 0.5) % 1, min: 0, w: 2,
-            c: [128, 128, 128], at: pillSpot(A, B, -1) },
+            c: [128, 128, 128], at: pillSpot(A, B, -1),
+            tie: tiePoint(pb) },
     };
   });
   SIG = "";
@@ -4644,8 +4685,9 @@ function timeKey() {
     + 'background:linear-gradient(90deg,' + st[0] + ',' + st[1] + ','
     + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
     + ' min, médiane du pas</span>'
-    + '<span style="opacity:.78">→ aller · ← retour · survolez une zone'
-    + ' pour partir d\'ailleurs</span>';
+    + '<span style="opacity:.78">un fil relie chaque durée à sa voie ·'
+    + ' les triangles donnent le sens · survolez une zone pour partir'
+    + ' d\'ailleurs</span>';
   el.style.color = (CFG.head && CFG.head.dim) || C.dim;
   /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
      légende des secteurs en prenait deux, et les pastilles qui se rangent
@@ -4698,7 +4740,7 @@ function arrowsAdvance(dt) {
      par trame ne coûtent rien à côté. */
   const items = [];
   for (const d of all) {
-    const ms = Math.max(2100, (d.min / TMAX) * ETALON_MS);
+    const ms = Math.max(3200, (d.min / TMAX) * ETALON_MS);
     d.p += dt / ms;
     while (d.p >= 1) { d.p -= 1; }
     const c = [Math.round(d.c[0] * 0.5), Math.round(d.c[1] * 0.5),
@@ -4759,6 +4801,17 @@ function labelSpots() {
 
    Le bas réserve la hauteur de la clé : une pastille posée dessus la
    rendait illisible. */
+/* Le point de la voie que la pastille décrit. Le fil part de là. */
+function tiePoint(path) {
+  const c = cumLen(path), L = c[c.length - 1] || 1e-9;
+  const want = L * PILL_AT;
+  let j = 1;
+  while (j < c.length - 1 && c[j] < want) { j++; }
+  const v = (want - c[j - 1]) / ((c[j] - c[j - 1]) || 1e-9);
+  const a = path[j - 1], b = path[j];
+  return [a[0] + (b[0] - a[0]) * v, a[1] + (b[1] - a[1]) * v];
+}
+
 function pillSpot(A, B, side) {
   const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
   const len = Math.hypot(dx, dy) || 1e-6;
@@ -4781,17 +4834,14 @@ function pillSpot(A, B, side) {
 
    Le liseré de la pastille reprend la couleur de sa voie, ce qui rattache
    le nombre à son trait quand deux pastilles se touchent. */
-function timePill(id, way, glyph) {
+function timePill(id, way) {
   return new deck.TextLayer({
     id: id, data: ROUTES, pickable: false,
     getPosition: d => [d[way].at[0], d[way].at[1], ROAD_Z + 54],
-    getText: d => glyph + Math.round(d[way].min) + " min",
+    getText: d => Math.round(d[way].min) + " min",
     getSize: 10.5, sizeUnits: "pixels",
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
     fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
-    /* L'atlas de caractères de deck.gl s'arrête à l'ASCII : la flèche n'y
-       était pas, et c'est l'étiquette entière qui tombait — sept pastilles
-       vides à bordure colorée. « auto » le construit sur le texte réel. */
     characterSet: "auto",
     background: true, backgroundPadding: [6, 3, 6, 3],
     getBackgroundColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 234],
@@ -4877,8 +4927,20 @@ function staticLayers() {
      est une propriété de la destination, pas du tracé. Le liseré de la
      pastille reprend la couleur de son itinéraire, ce qui rattache le
      nombre à son trait quand deux pastilles se touchent. */
-  out.push(timePill("route-time-ab", "ab", "→ "));
-  out.push(timePill("route-time-ba", "ba", "← "));
+  /* Le fil qui relie chaque pastille à sa voie. Il remplace la flèche
+     écrite dans l'étiquette : « → 24 min » demandait de savoir que la
+     flèche veut dire aller, et ne disait toujours pas de quelle liaison il
+     s'agissait. Un trait de la couleur de la bordure le dit sans mot. */
+  out.push(new deck.LineLayer({
+    id: "pill-tie", data: lanes(), pickable: false,
+    getSourcePosition: d => [d.tie[0], d.tie[1], ROAD_Z + 40],
+    getTargetPosition: d => [d.at[0], d.at[1], ROAD_Z + 48],
+    getColor: d => [d.c[0], d.c[1], d.c[2], 190],
+    getWidth: 1.2, widthUnits: "pixels",
+    parameters: { depthTest: false },
+  }));
+  out.push(timePill("route-time-ab", "ab"));
+  out.push(timePill("route-time-ba", "ba"));
   /* Sans depthTest coupé, les tours mangeaient la première lettre : le texte
      passait derrière une façade plus haute que son altitude. */
   out.push(new deck.TextLayer({
