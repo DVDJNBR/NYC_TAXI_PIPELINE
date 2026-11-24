@@ -4183,6 +4183,58 @@ function frame() {
 _CITY = r"""
 <script src="https://unpkg.com/deck.gl@8.9.36/dist.min.js"></script>
 <div id="city" style="position:absolute; inset:0;"></div>
+<div id="signs" style="position:absolute; inset:0; pointer-events:none;
+     overflow:hidden;"></div>
+<style>
+  /* L'étiquette d'un trajet.
+
+     Les cartes n'encadrent pas leurs noms : elles posent le texte sur le
+     fond et lui donnent un halo sombre pour le décoller, et c'est tout.
+     Le cadre, l'ombre portée et le fond flouté de la version précédente
+     étaient du vocabulaire d'interface, pas de cartographie — d'où
+     l'impression de vignette collée sur la ville.
+
+     Un halo plutôt qu'un contour franc : trois ombres faibles empilées
+     font un voile, là où un trait net ferait un pochoir. */
+  #signs .sign { position: absolute; transform: translate(-50%, -100%);
+                 font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+                 white-space: nowrap; will-change: transform, left, top;
+                 display: flex; flex-direction: column; align-items: center;
+                 opacity: 0.94;
+                 text-shadow: 0 0 3px rgba(8,7,10,0.95),
+                              0 0 6px rgba(8,7,10,0.8),
+                              0 1px 2px rgba(8,7,10,0.9); }
+  /* Un voile, pas un cadre : assez de fond pour que le texte tienne sur
+     un toit clair, pas assez pour faire une vignette posée sur la ville.
+     Ni bordure ni ombre portée. */
+  #signs .card { display: flex; flex-direction: column; align-items: center;
+                 gap: 0; padding: 3px 7px 4px; border-radius: 2px;
+                 background: rgba(10,9,12,0.4); }
+  #signs .from { font-size: 7.5px; font-weight: 500; letter-spacing: 0.1em;
+                 line-height: 1.3; text-transform: uppercase;
+                 color: rgba(242,239,230,0.46); }
+  /* « vers » dit le sens là où une flèche demandait d'être interprétée.
+     Plus petit et plus éteint que le nom qu'il relie : c'est une liaison
+     grammaticale, pas une donnée. */
+  #signs .from i { font-style: normal; font-size: 6.5px; font-weight: 500;
+                   letter-spacing: 0.08em; margin-left: 3px;
+                   text-transform: lowercase;
+                   color: rgba(242,239,230,0.34); }
+  #signs .to { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+               line-height: 1.3; text-transform: uppercase;
+               color: rgba(242,239,230,0.95); }
+  #signs .min { font-size: 10px; font-weight: 600; line-height: 1.35;
+                font-variant-numeric: tabular-nums;
+                color: rgba(242,239,230,0.78); }
+  #signs .min b { font-weight: 500; font-size: 8px; margin-left: 2px;
+                  color: rgba(242,239,230,0.45); }
+  /* Le fil et son point gardent la couleur de la durée : c'est le seul
+     endroit coloré de l'étiquette, et il touche la voiture. */
+  #signs .wire { width: 1px; height: 10px; background: currentColor;
+                 opacity: 0.6; }
+  #signs .dot { width: 3px; height: 3px; margin-top: -1px;
+                border-radius: 50%; background: currentColor; }
+</style>
 <script>
 /* Deux mille six cents gratte-ciel posent le sol, et au-dessus la carte
    répond à une seule question : depuis ce secteur, combien de temps pour
@@ -4225,31 +4277,64 @@ const ROAD_Z = 150;
    tous à la fois et la carte devenait agitée. Ce qui porte la donnée est
    le rapport des vitesses entre deux voies, pas la vitesse elle-même, et
    ce rapport se lit mieux au pas du ruban qu'à celui d'un jeu. */
-const ETALON_MS = 9000;
+const ETALON_MS = 15000;
+/* Le temps d'écran d'une minute de trajet. C'est une constante, et non une
+   part de la plus longue liaison du pas : rapportée au pas, une heure de
+   pointe où tout ralentit se serait réaffichée exactement comme une heure
+   creuse, puisque tout aurait grandi ensemble. À durée doublée, la voiture
+   met donc deux fois plus longtemps à faire sa route — et comme sa route
+   ne change pas de longueur, elle roule deux fois moins vite. */
+const MIN_MS = 520;
 const ROUTE_N = 32;           /* points par voie                           */
-/* Écart des deux voies de part et d'autre de l'itinéraire, en degrés et
-   non en part de la distance : les deux chaussées se touchent, comme sur
-   un plan routier, au lieu de s'écarter d'autant plus que le trajet est
-   long. À ce cadrage un degré vaut environ mille neuf cents pixels, donc
-   les deux voies sont séparées de moins de deux pixels : leurs liserés se
-   recouvrent et la liaison ne montre qu'une bande. */
-const LANE = 0.0009;
+/* Le change entre une distance d'écran, qui se pense en pixels, et une
+   distance de carte, qui se mesure en degrés. Au cadrage du bloc, un degré
+   de la métrique du sol vaut environ trois mille huit cents pixels en
+   travers du trajet. */
+const DEG_PX = 1 / 3800;
 
 /* Distance d'une pastille à sa voie, en part de la longueur du trajet. Les
    minutes se lisent à côté du trait qu'elles décrivent, et non au bout :
    au bout, les deux sens se superposaient et il fallait savoir lequel
    était au-dessus. */
 const PILL_OFF = 0.11, PILL_AT = 0.62;
-/* Posés à plat sur le sol, les triangles sont écrasés par l'inclinaison
-   de la vue : à cinquante-quatre degrés, un triangle de neuf pixels n'en
-   fait plus que cinq de haut et disparaît sur son trait. */
-const ARROW_PX = 17;
-/* Un triangle tous les tant de degrés : la densité du train est la même
-   sur un trajet court et sur un long, donc ce qui distingue les deux est la
-   vitesse, qui est la donnée. La valeur est celle qui rend les triangles
-   jointifs au cadrage du cockpit : à dix-sept pixels de côté d'icône, le
-   triangle peint en fait douze, et un degré en vaut mille neuf cents. */
-const ARROW_EVERY = 0.0063;
+/* La case de l'icône, en pixels d'écran. Le triangle n'a plus d'épaisseur
+   de voie à remplir : il est le tracé, donc il garde la même taille d'un
+   bout à l'autre de la carte. */
+const ARROW_BOX = 8;
+/* Le triangle peint est long de 46/64 de sa case, et les marqueurs sont
+   espacés d'une fois et demie cette longueur : un chapelet, et non une
+   bande pleine. */
+const ARROW_RUN = 42 / 64;
+const ARROW_GAP = 1;
+/* Le taxi, à la taille qu'il avait du temps de la nuée. */
+const TAXI_BOX = 15;
+/* Le taxi en volume est modelé en mètres, comme une vraie voiture, puis
+   agrandi : à ce cadrage un pixel vaut une trentaine de mètres, donc une
+   berline de cinq mètres ferait un sixième de pixel. L'échelle est ce qui
+   la ramène à la taille d'un objet qu'on voit. */
+const TAXI_SCALE = 132;
+/* Combien de taxis par trajet, et où. Ils ne roulent plus : un taxi
+   garé à mi-chemin tient son étiquette à distance des six autres, là où
+   sept voitures en mouvement finissaient toutes par se retrouver au départ
+   commun, étiquettes empilées. C'est le chapelet qui porte maintenant le
+   mouvement et le sens. */
+const CARS_PER = 1;
+/* D'où part la voiture à chaque tour. Le premier tiers du trajet est le
+   plus encombré — les sept liaisons y sortent du même secteur — et c'est
+   celui qu'on lui épargne. */
+const CARS_FROM = 0.34;
+/* L'écart entre deux taxis du même convoi, en part du trajet. */
+const CARS_GAP = 0.085;
+/* Le pas des triangles ne se convertit pas avec le même change que les
+   distances en travers : posés à plat, ils sont comprimés le long du
+   trajet par l'inclinaison de la vue. La valeur est mesurée sur la
+   planche, et prise un peu serrée : deux triangles qui se recouvrent ne se
+   voient pas, deux triangles qui s'écartent font des pointillés. */
+const ARROW_DEG = 1 / 4000;
+/* Le cap de la vue. La ville est tournée pour que Manhattan tienne en
+   diagonale ; les voitures s'en servent pour savoir de quel côté elles
+   roulent à l'écran. */
+const VIEWBEAR = -29;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
 /* Les sept secteurs dessinés. Staten Island en est absent — six courses par
@@ -4305,36 +4390,163 @@ const GROUND_A = 46 / 255;
 const LIFT = NIGHT ? [152, 148, 174] : [198, 195, 210];
 const LIFT_K = NIGHT ? [0.52, 0.34] : [0.26, 0.30];
 
-/* Le chevron est dessiné dans un canvas, pas chargé : une image venue
-   d'ailleurs aurait demandé un hôte.
+/* Les deux dessins sont faits dans un canvas, pas chargés : une image
+   venue d'ailleurs aurait demandé un hôte.
 
-   Il remplace le taxi. Une voiture par voie disait la durée par le temps
-   qu'elle mettait, mais une seule voiture ne dit pas le sens tant qu'on ne
-   la regarde pas bouger ; un train de chevrons le dit à l'arrêt, sur une
-   image fixe, et c'est ce que fait tout plan routier.
-
+   Le triangle d'abord. Il ne borde plus une bande : il **est** le tracé.
+   Un chapelet de marqueurs fins dit le chemin et le sens à l'arrêt, sur
+   une image fixe, là où un trait plein ne dit que le chemin — et là où
+   deux bandes épaisses, une par sens, mangeaient la ville.
    `mask: true` : la forme est un pochoir blanc, et c'est la couche qui lui
-   donne sa couleur — chaque chevron prend donc celle de sa voie, assombrie. */
+   donne sa couleur.
+
+   La voiture ensuite, vue de dessus, dans sa propre case. Elle n'est pas
+   un pochoir : elle a sa carrosserie, son pare-brise et sa lunette, donc
+   elle garde ses couleurs. Elle n'est pas jaune — le jaune du taxi est
+   déjà celui du point de départ et de l'accent de l'interface, et une
+   nuée jaune était précisément ce que ce bloc a cessé de montrer. */
+/* Le taxi en volume.
+
+   La maquette est faite de boîtes extrudées ; la voiture l'est aussi, pour
+   qu'elle appartienne à la même ville. Huit sommets par caisse, six faces,
+   des normales à plat : les facettes prennent la lumière de la scène comme
+   les toits des tours, et c'est l'ombrage qui donne le relief — pas un
+   dessin.
+
+   Les cotes sont en mètres, la voiture pointe vers +x, et z part du sol.
+   Dans la matrice de SimpleMeshLayer, l'orientation [tangage, lacet,
+   roulis] envoie l'axe +x du modèle sur (cos lacet, sin lacet, 0) : le cap
+   est donc le **lacet**, et le modèle est bien à z vers le haut. Pris pour
+   un roulis, le cap couchait la voiture sur le flanc. */
+function boxMesh(x0, x1, y0, y1, z0, z1) {
+  const P = [], N = [], I = [];
+  const face = (a, b, c, d, nx, ny, nz) => {
+    const base = P.length / 3;
+    for (const v of [a, b, c, d]) {
+      P.push(v[0], v[1], v[2]);
+      N.push(nx, ny, nz);
+    }
+    I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const p = (x, y, z) => [x, y, z];
+  face(p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1), p(x1, y0, z1), 1, 0, 0);
+  face(p(x0, y1, z0), p(x0, y0, z0), p(x0, y0, z1), p(x0, y1, z1), -1, 0, 0);
+  face(p(x1, y1, z0), p(x0, y1, z0), p(x0, y1, z1), p(x1, y1, z1), 0, 1, 0);
+  face(p(x0, y0, z0), p(x1, y0, z0), p(x1, y0, z1), p(x0, y0, z1), 0, -1, 0);
+  face(p(x0, y0, z1), p(x1, y0, z1), p(x1, y1, z1), p(x0, y1, z1), 0, 0, 1);
+  face(p(x0, y1, z0), p(x1, y1, z0), p(x1, y0, z0), p(x0, y0, z0), 0, 0, -1);
+  return { P: P, N: N, I: I };
+}
+
+/* Un profil extrudé : la silhouette de la voiture vue de flanc, tirée en
+   largeur. C'est ce qui donne un capot et un pare-brise inclinés, là où un
+   empilement de caisses ne fait que des marches.
+
+   Le profil doit être convexe : les deux flancs sont fermés en éventail
+   depuis leur premier sommet. La voiture est donc faite de deux profils,
+   le bas de caisse et l'habitacle, chacun convexe de son côté. */
+function prismMesh(prof, y0, y1) {
+  const P = [], N = [], I = [];
+  const n = prof.length;
+  const push = (x, y, z, nx, ny, nz) => {
+    P.push(x, y, z); N.push(nx, ny, nz);
+    return P.length / 3 - 1;
+  };
+  for (const side of [0, 1]) {
+    const y = side ? y1 : y0, ny = side ? 1 : -1;
+    const base = P.length / 3;
+    for (const q of prof) { push(q[0], y, q[1], 0, ny, 0); }
+    for (let k = 1; k < n - 1; k++) {
+      if (side) { I.push(base, base + k, base + k + 1); }
+      else { I.push(base, base + k + 1, base + k); }
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    const a = prof[k], b = prof[(k + 1) % n];
+    const dx = b[0] - a[0], dz = b[1] - a[1];
+    const L = Math.hypot(dx, dz) || 1e-6;
+    const nx = dz / L, nz = -dx / L;
+    const i0 = push(a[0], y0, a[1], nx, 0, nz);
+    const i1 = push(b[0], y0, b[1], nx, 0, nz);
+    const i2 = push(b[0], y1, b[1], nx, 0, nz);
+    const i3 = push(a[0], y1, a[1], nx, 0, nz);
+    I.push(i0, i1, i2, i0, i2, i3);
+  }
+  return { P: P, N: N, I: I };
+}
+
+function mergeMesh(parts) {
+  const P = [], N = [], I = [];
+  for (const b of parts) {
+    const base = P.length / 3;
+    for (const v of b.P) { P.push(v); }
+    for (const v of b.N) { N.push(v); }
+    for (const v of b.I) { I.push(base + v); }
+  }
+  return {
+    attributes: {
+      positions: { size: 3, value: new Float32Array(P) },
+      normals: { size: 3, value: new Float32Array(N) },
+    },
+    indices: { size: 1, value: new Uint16Array(I) },
+  };
+}
+
+/* La voiture : une seule forme, d'une seule couleur.
+
+   À dix-huit pixels de long, une vitre et quatre roues ne font pas une
+   voiture détaillée : elles font trois taches sombres. Entre une maquette
+   fouillée, qu'on ne verrait pas, et une silhouette franche, qui se lit,
+   c'est la silhouette qui gagne — la ville autour est faite du même parti
+   pris, des volumes nus que seule la lumière creuse.
+
+   Le profil est celui d'une berline vue de flanc : nez plongeant, capot,
+   pare-brise incliné, pavillon, lunette, coffre. */
+const TAXI_HULL = mergeMesh([
+  prismMesh([[-2.40, 0.30], [-2.14, 0.08], [2.14, 0.08], [2.40, 0.30],
+             [2.40, 0.86], [1.18, 0.86], [0.70, 1.46], [-1.02, 1.46],
+             [-1.52, 0.86], [-2.40, 0.86]], -0.90, 0.90),
+]);
+
 function arrowAtlas() {
   const c = document.createElement("canvas");
-  c.width = 64; c.height = 64;
+  c.width = 128; c.height = 64;
   const g = c.getContext("2d");
-  /* Un triangle plein, long et bas, et non un chevron haut : posé sur une
-     voie de deux pixels et demi, un marqueur aussi haut que large débordait
-     sur la voie d'à côté, dont les triangles pointent en sens inverse. Les
-     deux trains se croisaient en X au lieu de se suivre. */
   g.fillStyle = "#ffffff";
   g.beginPath();
-  g.moveTo(10, 22);
+  g.moveTo(12, 20);
   g.lineTo(54, 32);
-  g.lineTo(10, 42);
+  g.lineTo(12, 44);
   g.closePath();
   g.fill();
+
+  /* Le taxi vu de dessus, celui de la nuée d'avant : quatre roues, un
+     pavillon, un pare-brise, et le jaune de la voiture. Il est couché sur
+     le plan du sol comme les marqueurs, donc il tourne avec son cap. */
+  g.save();
+  g.translate(64, 0);
+  g.fillStyle = "#2a241c";
+  g.fillRect(14, 15, 11, 6); g.fillRect(14, 43, 11, 6);
+  g.fillRect(39, 15, 11, 6); g.fillRect(39, 43, 11, 6);
+  g.fillStyle = "#edad12";
+  g.beginPath();
+  if (g.roundRect) { g.roundRect(8, 19, 48, 26, 8); }
+  else { g.rect(8, 19, 48, 26); }
+  g.fill();
+  g.fillStyle = "#30281e";
+  g.fillRect(41, 23, 10, 18);
+  g.fillStyle = "#8a6f3a";
+  g.fillRect(20, 25, 16, 14);
+  g.fillStyle = "#fff3cf";
+  g.fillRect(27, 29, 7, 6);
+  g.restore();
   return c;
 }
 const ATLAS = arrowAtlas();
 const MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64,
-                           anchorX: 32, anchorY: 32, mask: true } };
+                           anchorX: 32, anchorY: 32, mask: true },
+                  taxi: { x: 64, y: 0, width: 64, height: 64,
+                          anchorX: 32, anchorY: 32, mask: false } };
 
 /* Les aéroports ne sont pas un secteur de la maquette : JFK et LaGuardia
    tombent dans le polygone du Queens, Newark est hors cadre. Mais le ruban
@@ -4344,6 +4556,11 @@ const MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64,
 const AIR_CODE = { "JFK Airport": "JFK", "LaGuardia Airport": "LGA",
                    "Newark Airport": "EWR" };
 let AIRPORTS = [], AIR_RGB = [120, 120, 130];
+
+/* Le gris des marqueurs de direction. Ils sont le tracé : assez clairs
+   pour se détacher du sol de nuit, assez éteints pour que la ville reste
+   la chose la plus visible de la carte. */
+const ARROW_RGB = [128, 128, 128];
 
 let CITY = null, GROUND = null, SPACED = null;
 let RIDE = null, TIMES = {}, STATIC = [];
@@ -4517,12 +4734,12 @@ function groundOf(s) {
    Les deux sens prennent chacun leur voie, de part et d'autre de cette
    courbe, comme les deux chaussées d'une avenue. Superposés, ils se
    seraient masqués l'un l'autre et seule la durée du dessus se serait vue. */
-function lanePath(A, B, side) {
+function lanePath(A, B, offPx) {
   const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
   const len = Math.hypot(dx, dy) || 1e-6;
   const px = -dy / len / KLAT, py = dx / len;
   const bow = len * 0.19;
-  const off = side * LANE;
+  const off = offPx * DEG_PX;
   const ax = A[0] + px * off, ay = A[1] + py * off;
   const bx = B[0] + px * off, by = B[1] + py * off;
   const cx = ax + (bx - ax) * 0.58 + px * bow;
@@ -4549,12 +4766,16 @@ function cumLen(path) {
   return out;
 }
 
-/* Les deux voies de chaque liaison, à plat, pour les couches qui dessinent
-   un trait par sens. */
+/* La voie de chaque liaison, à plat, pour les couches qui dessinent un
+   objet par trajet.
+
+   Il n'y en a plus qu'une par liaison. Le retour n'est pas perdu : il se
+   lit en désignant l'autre secteur, puisque la carte montre toujours les
+   trajets **au départ** de celui qu'on survole. Deux sens dessinés en même
+   temps demandaient deux bandes, donc de l'épaisseur, donc une ville
+   couverte de barres. */
 function lanes() {
-  const out = [];
-  for (const r of ROUTES) { out.push(r.ab, r.ba); }
-  return out;
+  return ROUTES.map(r => r.ab);
 }
 
 /* La géométrie. Elle ne dépend que du secteur de départ et du nœud
@@ -4580,29 +4801,34 @@ function build() {
      au tirage à chaque changement de pas faisait sauter les quatorze
      voitures en même temps, une fois par seconde et demie. */
   const was = {};
-  for (const r of ROUTES) { was[r.s] = [r.ab.p, r.ba.p]; }
+  for (const r of ROUTES) { was[r.s] = [r.ab.p, r.ab.tp]; }
   const A = nodeAt(mainNode(FOCUS));
   ROUTES = dests.map(s => {
-    const B = nodeAt(mainNode(s));
-    const pa = lanePath(A, B, 1);
-    /* Le retour parcourt sa voie dans l'autre sens : on la retourne, et la
-       voiture part donc de l'arrivée. */
-    const pb = lanePath(A, B, -1).reverse();
     const k = was[s] || [Math.random(), Math.random()];
     return {
-      s: s, name: SECNAME[s],
-      /* Les deux trains partent en quinconce : partis ensemble, leurs
-         flèches se faisaient face au milieu de la bande. */
-      ab: { path: pa, cum: cumLen(pa), p: k[0], min: 0, w: 2,
-            c: [128, 128, 128], at: pillSpot(A, B, 1),
-            tie: tiePoint(pa) },
-      ba: { path: pb, cum: cumLen(pb), p: (k[1] + 0.5) % 1, min: 0, w: 2,
-            c: [128, 128, 128], at: pillSpot(A, B, -1),
-            tie: tiePoint(pb) },
+      s: s, name: SECNAME[s], A: A, B: nodeAt(mainNode(s)),
+      /* `p` est la phase du chapelet, `tp` celle de la voiture : elles
+         avancent au même rythme mais pas ensemble, sinon la voiture reste
+         posée sur un triangle pour toujours. */
+      ab: { p: k[0], tp: k[1], min: 0, trips: 0, c: [128, 128, 128],
+            name: SECNAME[s], s: s, ix: 0 },
     };
   });
+  ROUTES.forEach((r, i) => { r.ab.ix = i; });
   SIG = "";
   refresh(true);
+}
+
+/* La géométrie des trajets : un tracé par liaison, sur l'axe.
+
+   Il n'y a plus d'épaisseur à loger, donc plus d'écart de voie : le chemin
+   de l'aller est le chemin tout court. */
+function shapeLanes() {
+  for (const r of ROUTES) {
+    const pa = lanePath(r.A, r.B, 0);
+    r.ab.path = pa; r.ab.cum = cumLen(pa); r.ab.tie = tiePoint(pa);
+    r.ab.at = pillSpot(r.A, r.B, 1);
+  }
 }
 
 /* Ce qui glisse : les durées, les couleurs, l'isochrone. La géométrie ne
@@ -4615,15 +4841,12 @@ function build() {
 function refresh(force) {
   if (!ROUTES.length) { return; }
   const around = timesAround(SECNAME[FOCUS]);
-  let mn = Infinity, mx = 0, vmax = 0;
+  let mn = Infinity, mx = 0;
   for (const r of ROUTES) {
     const d = around[r.name];
-    if (!d || !d.ab || !d.ba) { continue; }
-    for (const k of ["ab", "ba"]) {
-      if (d[k].min < mn) { mn = d[k].min; }
-      if (d[k].min > mx) { mx = d[k].min; }
-      if (d[k].trips > vmax) { vmax = d[k].trips; }
-    }
+    if (!d || !d.ab) { continue; }
+    if (d.ab.min < mn) { mn = d.ab.min; }
+    if (d.ab.min > mx) { mx = d.ab.min; }
   }
   TMIN = isFinite(mn) ? mn : 0;
   TMAX = mx > TMIN ? mx : TMIN + 1;
@@ -4631,22 +4854,22 @@ function refresh(force) {
   let sig = SECNAME[FOCUS] + "|";
   for (const r of ROUTES) {
     const d = around[r.name];
-    if (!d || !d.ab || !d.ba) { continue; }
-    for (const k of ["ab", "ba"]) {
-      const u = (d[k].min - TMIN) / (TMAX - TMIN);
-      r[k].min = d[k].min;
-      r[k].c = ramp(u);
-      /* L'épaisseur suit la racine du volume : une liaison dix fois plus
-         forte est trois fois plus épaisse, ce qui est la règle d'un tracé
-         de flux — l'oeil compare des surfaces, pas des largeurs. */
-      r[k].w = 1.7 + 3.1 * Math.sqrt(d[k].trips / (vmax || 1));
-      sig += Math.round(d[k].min) + "," + Math.round(u * 40) + ";";
-    }
-    BAND[r.s] = (d.ab.min - TMIN) / (TMAX - TMIN);
+    if (!d || !d.ab) { continue; }
+    const u = (d.ab.min - TMIN) / (TMAX - TMIN);
+    r.ab.min = d.ab.min;
+    r.ab.trips = d.ab.trips;
+    /* La couleur ne peint plus de bande : elle ne reste que sur le liseré
+       de la pastille et sur le fil qui l'attache, pour ranger les durées
+       d'un coup d'oeil sans rien étaler sur la ville. */
+    r.ab.c = ramp(u);
+    sig += Math.round(d.ab.min) + "," + Math.round(u * 40) + ";";
+    BAND[r.s] = u;
   }
+  if (force) { shapeLanes(); }
   if (!force && sig === SIG) { return; }
   SIG = sig;
   STATIC = staticLayers();
+  paintSigns();
   timeKey();
 }
 
@@ -4685,9 +4908,9 @@ function timeKey() {
     + 'background:linear-gradient(90deg,' + st[0] + ',' + st[1] + ','
     + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
     + ' min, médiane du pas</span>'
-    + '<span style="opacity:.78">un fil relie chaque durée à sa voie ·'
-    + ' les triangles donnent le sens · survolez une zone pour partir'
-    + ' d\'ailleurs</span>';
+    + '<span style="opacity:.78">un chapelet par trajet, au départ du'
+    + ' secteur · le taxi marque le milieu du parcours · survolez une zone'
+    + ' pour partir d\'ailleurs</span>';
   el.style.color = (CFG.head && CFG.head.dim) || C.dim;
   /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
      légende des secteurs en prenait deux, et les pastilles qui se rangent
@@ -4729,30 +4952,44 @@ function arrowsAdvance(dt) {
   const all = lanes();
   if (!all.length) { RIDE = null; return; }
   let n = 0;
+  /* Le pas est le même partout : la densité du chapelet ne dit rien, seule
+     sa vitesse parle, et elle est la durée. */
+  const step = ARROW_BOX * ARROW_RUN * ARROW_GAP * ARROW_DEG;
   for (const d of all) {
-    d.arr = Math.max(4, Math.round(
-      (d.cum[d.cum.length - 1] || 0) / ARROW_EVERY));
-    n += d.arr;
+    d.arr = Math.max(3, Math.round((d.cum[d.cum.length - 1] || 0) / step));
+    n += d.arr + 1;
   }
   /* Des objets et non des tableaux binaires : la couche des chevrons porte
      une couleur par chevron, et deck.gl ne rendait rien du tout quand elle
      lui était passée en attribut binaire. Cent trente-six objets refaits
      par trame ne coûtent rien à côté. */
-  const items = [];
+  const items = [], cars = [];
   for (const d of all) {
-    const ms = Math.max(3200, (d.min / TMAX) * ETALON_MS);
+    const ms = Math.max(2600, d.min * MIN_MS);
     d.p += dt / ms;
     while (d.p >= 1) { d.p -= 1; }
-    const c = [Math.round(d.c[0] * 0.5), Math.round(d.c[1] * 0.5),
-               Math.round(d.c[2] * 0.5)];
+    d.tp += dt / ms;
+    while (d.tp >= 1) { d.tp -= 1; }
     for (let k = 0; k < d.arr; k++) {
       let f = d.p + k / d.arr;
       f -= Math.floor(f);
       const q = alongLane(d, f);
-      items.push({ p: [q[0], q[1], ROAD_Z + 14], a: q[2], c: c });
+      items.push({ p: [q[0], q[1], ROAD_Z + 14], a: q[2], c: ARROW_RGB,
+                   s: ARROW_BOX, i: "arrow" });
+    }
+    for (let k = 0; k < CARS_PER; k++) {
+      /* Chaque voiture a sa phase propre, tirée une fois pour toutes : sept
+         voitures reparties du même point au même instant se suivaient en
+         rang d'oignons, et leurs sept étiquettes avec. */
+      let u = d.tp - k * CARS_GAP;
+      u -= Math.floor(u);
+      const t = alongLane(d, CARS_FROM + (1 - CARS_FROM) * u);
+      cars.push({ p: [t[0], t[1], ROAD_Z + 26], a: t[2], d: d,
+                  lead: k === 0 });
     }
   }
-  RIDE = { n: n, items: items };
+  RIDE = { n: n, items: items, cars: cars,
+           leads: cars.filter(c => c.lead) };
 }
 /* Les étiquettes sont ramenées dans le cadre en pixels, pas en degrés : la
    vue est tournée de 29 degrés, si bien qu'une borne en longitude ne
@@ -4825,34 +5062,92 @@ function pillSpot(A, B, side) {
   return clampedTo(g, ROAD_Z + 54, padX, HEAD + 16, H - LEGH - 20);
 }
 
-/* La pastille des minutes, une par sens, posée à l'arrivée.
+/* La pastille d'une liaison : d'où l'on part, où l'on va, et combien de
+   minutes. Une seule par trajet, maintenant qu'il n'y a qu'un sens.
 
-   C'est le seul nombre écrit sur la carte, et il est écrit là où l'on
-   arrive : le temps de trajet est une propriété de la destination, pas du
-   tracé. L'aller au-dessus, le retour en dessous, et une flèche devant
-   chacun — sans elle, deux nombres empilés sans raison apparente.
+   Le nom du départ est répété sur chaque pastille alors qu'il est le même
+   partout. C'est voulu : la pastille se lit seule, sans remonter au titre
+   du bloc, et c'est le seul endroit où le sens du trajet est écrit en
+   toutes lettres.
 
-   Le liseré de la pastille reprend la couleur de sa voie, ce qui rattache
-   le nombre à son trait quand deux pastilles se touchent. */
-function timePill(id, way) {
-  return new deck.TextLayer({
-    id: id, data: ROUTES, pickable: false,
-    getPosition: d => [d[way].at[0], d[way].at[1], ROAD_Z + 54],
-    getText: d => Math.round(d[way].min) + " min",
-    getSize: 10.5, sizeUnits: "pixels",
-    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
-    fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
-    characterSet: "auto",
-    background: true, backgroundPadding: [6, 3, 6, 3],
-    getBackgroundColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 234],
-    getBorderColor: d => {
-      const c = d[way].c;
-      return [c[0], c[1], c[2], 255];
-    },
-    getBorderWidth: 1.2,
-    getColor: NIGHT ? [238, 235, 246, 255] : [38, 36, 50, 255],
-    parameters: { depthTest: false },
-  });
+   Le liseré reprend la couleur de la durée, ce qui range les sept
+   pastilles entre elles sans rien peindre sur la ville. */
+/* Les pancartes.
+
+   Une par liaison, posée sur le toit du taxi et portée par le DOM : elles
+   sont reprojetées à chaque trame à partir de la position de la voiture,
+   comme le ferait une annotation de carte. Le texte dit la destination et
+   la durée ; le départ est dans le titre du bloc, et le répéter sept fois
+   faisait sept fois « Midtown ».
+
+   Le décalage vertical suit la taille du taxi : la pointe de la queue
+   tombe sur son pavillon. */
+let SIGNS = {};
+
+function signHost() { return document.getElementById("signs"); }
+
+function paintSigns() {
+  const host = signHost();
+  if (!host) { return; }
+  const want = {};
+  for (const r of ROUTES) { want[r.s] = r; }
+  for (const k of Object.keys(SIGNS)) {
+    if (!want[k]) { SIGNS[k].el.remove(); delete SIGNS[k]; }
+  }
+  for (const r of ROUTES) {
+    let sg = SIGNS[r.s];
+    if (!sg) {
+      const el = document.createElement("div");
+      el.className = "sign";
+      el.innerHTML = '<div class="card"><span class="from"></span>'
+                   + '<span class="to"></span><span class="min"></span>'
+                   + '</div><i class="wire"></i><i class="dot"></i>';
+      host.appendChild(el);
+      sg = SIGNS[r.s] = { el: el, from: el.querySelector(".from"),
+                          to: el.querySelector(".to"),
+                          min: el.querySelector(".min"), txt: "", col: "" };
+    }
+    /* La clé porte le départ : en changeant de secteur de survol, une
+       étiquette gardée telle quelle aurait affiché l'ancien départ. */
+    const key = SECNAME[FOCUS] + " > " + r.name;
+    if (sg.txt !== key) {
+      sg.from.innerHTML = SECNAME[FOCUS] + " <i>vers</i>";
+      sg.to.textContent = r.name;
+      sg.txt = key;
+    }
+    const c = r.ab.c;
+    const col = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    if (sg.col !== col) { sg.el.style.color = col; sg.col = col; }
+    /* Au dixième de minute : c'est la précision de la médiane calculée,
+       et arrondir à l'unité effaçait l'écart entre deux liaisons proches. */
+    const m = Math.round(r.ab.min * 10) / 10;
+    if (sg.m !== m) {
+      sg.min.innerHTML = m.toFixed(1) + '<b>min</b>';
+      sg.m = m;
+    }
+  }
+}
+
+/* Reprojeter, et cacher ce qui sort du cadre : une pancarte laissée au
+   bord se collait contre le liseré du bloc. */
+function placeSigns() {
+  const host = signHost(), el = document.getElementById("city");
+  if (!host || !el || !RIDE || !VIEWSTATE || !deck.WebMercatorViewport) {
+    return;
+  }
+  const W = el.clientWidth || 600, H = el.clientHeight || 400;
+  const vp = new deck.WebMercatorViewport(
+    Object.assign({ width: W, height: H }, VIEWSTATE));
+  for (const c of RIDE.leads) {
+    const g = SIGNS[c.d.s];
+    if (!g) { continue; }
+    const q = vp.project([c.p[0], c.p[1], c.p[2]]);
+    const out = q[0] < 24 || q[0] > W - 24 || q[1] < 30 || q[1] > H - LEGH;
+    g.el.style.display = out ? "none" : "block";
+    if (out) { continue; }
+    g.el.style.left = Math.round(q[0]) + "px";
+    g.el.style.top = Math.round(q[1] - 3) + "px";
+  }
 }
 
 function staticLayers() {
@@ -4880,44 +5175,50 @@ function staticLayers() {
     getFillColor: d => {
       const g = GROUND[d.s], t = Math.min(1, (d.h - 61) / 240);
       const k = LIFT_K[0] + LIFT_K[1] * t;
+      /* Les façades laissent passer un peu du sol : la ville se pose
+         sur la carte au lieu de la masquer, et un itinéraire qui passe
+         derrière une tour ne disparaît pas tout à fait. */
       return [g[0] + (LIFT[0] - g[0]) * k, g[1] + (LIFT[1] - g[1]) * k,
-              g[2] + (LIFT[2] - g[2]) * k, 248];
+              g[2] + (LIFT[2] - g[2]) * k, 212];
     },
     /* L'ambiante et la rasante additionnées dépassaient 1 : les toits
        saturaient en blanc quelle que soit leur couleur de base. */
     material: { ambient: 0.70, diffuse: 0.62, shininess: 10,
                 specularColor: [30, 28, 38] },
   }));
-  /* Un itinéraire se dessine en deux couches : le liseré sombre, large, et
-     le tracé coloré, fin, par-dessus. C'est la recette de tous les GPS, et
-     deck.gl n'a pas de propriété pour la faire d'un coup. Sans le liseré,
-     un tracé vert posé sur un toit clair disparaît, et deux itinéraires
-     qui se croisent se confondent. */
-  out.push(new deck.PathLayer({
-    id: "route-case", data: lanes(), pickable: false,
-    getPath: d => d.path,
-    getColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 214],
-    getWidth: d => d.w + 3.6, widthUnits: "pixels",
-    capRounded: true, jointRounded: true,
+  /* Les arrivées : un petit disque clair, d'une autre couleur que le
+     départ, posé au centre de chaque secteur atteint. Sans eux, les sept
+     chapelets se terminaient dans le vide. */
+  out.push(new deck.ScatterplotLayer({
+    id: "dests", data: ROUTES, pickable: false,
+    getPosition: d => [d.B[0], d.B[1], ROAD_Z + 16],
+    radiusUnits: "pixels", getRadius: 4.2,
+    stroked: true, filled: true, lineWidthUnits: "pixels",
+    getLineWidth: 1.8,
+    getFillColor: NIGHT ? [238, 235, 228, 240] : [46, 44, 58, 240],
+    getLineColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 232],
     parameters: { depthTest: false },
   }));
-  out.push(new deck.PathLayer({
-    id: "route", data: lanes(), pickable: false,
-    getPath: d => d.path,
-    getColor: d => [d.c[0], d.c[1], d.c[2], 250],
-    getWidth: d => d.w, widthUnits: "pixels",
-    capRounded: true, jointRounded: true,
+  /* Le point de départ, à la manière d'un GPS : un disque, son anneau, et
+     une auréole large et faible qui le fait repérer de loin sans
+     l'épaissir. Il prend le jaune du taxi, qui est la couleur de ce qui
+     nous concerne. */
+  out.push(new deck.ScatterplotLayer({
+    id: "focus-halo", data: [nodeAt(mainNode(FOCUS))], pickable: false,
+    getPosition: d => [d[0], d[1], ROAD_Z + 14],
+    radiusUnits: "pixels", getRadius: 15,
+    stroked: true, filled: true, lineWidthUnits: "pixels",
+    getLineWidth: 1.2,
+    getFillColor: rgb(C.accent).concat([28]),
+    getLineColor: rgb(C.accent).concat([96]),
     parameters: { depthTest: false },
   }));
-  /* Le point de départ, à la manière d'un GPS : un disque et son anneau.
-     Sans lui, on ne sait pas d'où partent les huit itinéraires. Il prend le
-     jaune du taxi, qui est la couleur de ce qui nous concerne. */
   out.push(new deck.ScatterplotLayer({
     id: "focus", data: [nodeAt(mainNode(FOCUS))], pickable: false,
     getPosition: d => [d[0], d[1], ROAD_Z + 18],
-    radiusUnits: "pixels", getRadius: 6.4,
+    radiusUnits: "pixels", getRadius: 8.4,
     stroked: true, filled: true, lineWidthUnits: "pixels",
-    getLineWidth: 3.2,
+    getLineWidth: 3.4,
     getFillColor: rgb(C.accent).concat([255]),
     getLineColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 238],
     parameters: { depthTest: false },
@@ -4927,20 +5228,7 @@ function staticLayers() {
      est une propriété de la destination, pas du tracé. Le liseré de la
      pastille reprend la couleur de son itinéraire, ce qui rattache le
      nombre à son trait quand deux pastilles se touchent. */
-  /* Le fil qui relie chaque pastille à sa voie. Il remplace la flèche
-     écrite dans l'étiquette : « → 24 min » demandait de savoir que la
-     flèche veut dire aller, et ne disait toujours pas de quelle liaison il
-     s'agissait. Un trait de la couleur de la bordure le dit sans mot. */
-  out.push(new deck.LineLayer({
-    id: "pill-tie", data: lanes(), pickable: false,
-    getSourcePosition: d => [d.tie[0], d.tie[1], ROAD_Z + 40],
-    getTargetPosition: d => [d.at[0], d.at[1], ROAD_Z + 48],
-    getColor: d => [d.c[0], d.c[1], d.c[2], 190],
-    getWidth: 1.2, widthUnits: "pixels",
-    parameters: { depthTest: false },
-  }));
-  out.push(timePill("route-time-ab", "ab"));
-  out.push(timePill("route-time-ba", "ba"));
+
   /* Sans depthTest coupé, les tours mangeaient la première lettre : le texte
      passait derrière une façade plus haute que son altitude. */
   out.push(new deck.TextLayer({
@@ -4960,18 +5248,23 @@ function staticLayers() {
   }));
   if (AIRPORTS.length) {
     out.push(new deck.ScatterplotLayer({
+      /* Un aéroport n'est pas un secteur de plus : c'est la seule
+         destination qui ne touche pas les autres et la plus lointaine en
+         temps. Son repère est donc plus grand qu'un centre de secteur, et
+         plein, pour qu'on le trouve avant de lire les trois lettres. */
       id: "air-ring", data: AIRPORTS, pickable: false,
       getPosition: d => [d.lon, d.lat, ALT + 160],
-      radiusUnits: "pixels", getRadius: 4.6,
-      stroked: true, filled: false, lineWidthUnits: "pixels",
-      getLineWidth: 1.5,
+      radiusUnits: "pixels", getRadius: 7.6,
+      stroked: true, filled: true, lineWidthUnits: "pixels",
+      getFillColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 210],
+      getLineWidth: 2,
       getLineColor: [AIR_RGB[0], AIR_RGB[1], AIR_RGB[2], 225],
       parameters: { depthTest: false },
     }));
     out.push(new deck.TextLayer({
       id: "air-text", data: AIRPORTS, pickable: false,
       getPosition: d => [d.lon, d.lat, ALT + 160],
-      getText: d => d.code, getSize: 9, sizeUnits: "pixels",
+      getText: d => d.code, getSize: 10.5, sizeUnits: "pixels",
       getPixelOffset: [0, -14],
       fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif",
       fontWeight: 700,
@@ -4999,10 +5292,37 @@ function layers() {
     data: RIDE.items, pickable: false,
     getPosition: d => d.p, getAngle: d => d.a,
     getColor: d => d.c,
-    getIcon: () => "arrow", sizeUnits: "pixels", getSize: ARROW_PX,
+    getIcon: d => d.i, sizeUnits: "pixels", getSize: d => d.s,
     billboard: false, parameters: { depthTest: false },
     updateTriggers: { getPosition: RIDE.items, getAngle: RIDE.items,
-                      getColor: RIDE.items },
+                      getColor: RIDE.items, getSize: RIDE.items,
+                      getIcon: RIDE.items },
+  }));
+  /* L'ombre portée du taxi : un disque sombre à même la chaussée. Sans
+     elle la voiture flotte, puisque rien d'autre sur la carte n'a
+     d'épaisseur à cet endroit. */
+  out.push(new deck.ScatterplotLayer({
+    id: "ride-puck", data: RIDE.cars, pickable: false,
+    getPosition: d => d.p,
+    radiusUnits: "pixels", getRadius: TAXI_BOX * 0.52,
+    stroked: false, filled: true,
+    getFillColor: [8, 7, 11, 150],
+    parameters: { depthTest: false },
+    updateTriggers: { getPosition: RIDE.cars },
+  }));
+  /* La silhouette, d'un seul tenant. Ses facettes prennent la lumière de
+     la scène, comme les toits des tours : le relief ne vient que de là. */
+  out.push(new deck.SimpleMeshLayer({
+    id: "cars", data: RIDE.cars, mesh: TAXI_HULL, pickable: false,
+    getPosition: d => d.p, getOrientation: d => [0, d.a, 0],
+    getColor: [227, 168, 26, 236], sizeScale: TAXI_SCALE,
+    material: { ambient: 0.58, diffuse: 0.64, shininess: 24,
+                specularColor: [60, 52, 30] },
+    /* Le test de profondeur est rallumé pour la voiture, et pour elle
+       seule : sans lui, les faces arrière et les roues se peignaient
+       par-dessus la carrosserie et il ne restait qu'une tache. */
+    parameters: { depthTest: true, depthMask: true },
+    updateTriggers: { getPosition: RIDE.cars, getOrientation: RIDE.cars },
   }));
   return out;
 }
@@ -5031,7 +5351,7 @@ function fitted() {
   w -= mx; e += mx; s -= my; n += my;
   VIEWSTATE = { longitude: (w + e) / 2 - 0.022, latitude: (s + n) / 2 - 0.008,
                 zoom: Math.log2(0.98 * W * 360 / (512 * (e - w))),
-                pitch: 54, bearing: -29 };
+                pitch: 54, bearing: VIEWBEAR };
   return VIEWSTATE;
 }
 
@@ -5111,6 +5431,7 @@ function frame(now) {
     refresh(false);
     arrowsAdvance(dt);
     deckgl.setProps({ layers: layers() });
+    placeSigns();
   }
   requestAnimationFrame(frame);
 }
