@@ -41,6 +41,12 @@ done
 #
 # dur_cycle.parquet est la troisième table, écrite par le même script depuis
 # la version 10 : la case des durées en lit la distribution complète.
+#
+# od_cycle est vérifiée de la même façon, et pour la même raison : la carte
+# des temps de trajet lit MED_MINUTES, que J n'écrit que depuis la version
+# 18. Une table antérieure existe et a les bons noms de fichier, donc
+# passait la garde — et le dashboard tombait sur KeyError: 'MED_MINUTES' au
+# rendu de la carte, en production seulement.
 needs_cycles=0
 if [ ! -f /app/data/aggregates/zone_cycle.parquet ] \
    || [ ! -f /app/data/aggregates/od_cycle.parquet ] \
@@ -58,9 +64,14 @@ if not need <= cols:
     sys.exit(1)
 t = pq.read_table(P, columns=['SCOPE', 'STEP'])
 steps = pc.unique(t['STEP'].filter(pc.equal(t['SCOPE'], 'dow')))
-sys.exit(0 if len(steps) == 7 else 1)
+if len(steps) != 7:
+    sys.exit(1)
+O = '/app/data/aggregates/od_cycle.parquet'
+if not {'MED_MINUTES', 'AVG_MINUTES'} <= set(pq.read_schema(O).names):
+    sys.exit(1)
+sys.exit(0)
 " 2>/dev/null; then
-    echo "zone_cycle.parquet est d'une version antérieure — reconstruction."
+    echo "Les cycles sont d'une version antérieure — reconstruction."
     needs_cycles=1
 fi
 if [ "$needs_cycles" = 1 ]; then
