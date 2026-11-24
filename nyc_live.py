@@ -64,6 +64,11 @@ GEO = ROOT / "data" / "reference" / "taxi_zones.json"
 # Sans cette copie, le conteneur de production n'a pas de tours : le fichier
 # n'existait que dans static/, qui est hors du dépôt.
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
+# Les fontes des plaques vivent dans assets/, qui est versionné et copié
+# dans l'image ; static/ ne l'est ni l'un ni l'autre. Elles y étaient
+# déposées à la main, donc présentes en local et absentes en production —
+# deux 404 et des plaques en police système, sur la page déployée seulement.
+FONTS = ROOT / "assets" / "fonts"
 ZONE_CYCLE = ROOT / "data" / "aggregates" / "zone_cycle.parquet"
 OD_CYCLE = ROOT / "data" / "aggregates" / "od_cycle.parquet"
 DUR_CYCLE = ROOT / "data" / "aggregates" / "dur_cycle.parquet"
@@ -458,6 +463,7 @@ def _outer_ring(geometry: dict) -> list:
 
 def meta() -> dict:
     _serve_city()
+    _serve_fonts()
     return _build(PAYLOAD_VERSION, GEO.stat().st_mtime,
                   ZONE_CYCLE.stat().st_mtime, OD_CYCLE.stat().st_mtime,
                   DUR_CYCLE.stat().st_mtime)
@@ -481,6 +487,22 @@ def _stamp() -> str:
     except OSError:
         return "0"
     return format(n[0] * 1000003 ^ n[1] * 10007 ^ n[2], "x")[-8:]
+
+
+def _serve_fonts() -> None:
+    """Pose les fontes des plaques dans static/fonts/, si elles manquent.
+
+    Le conteneur recrée static/ à chaque démarrage et n'a pas forcément de
+    réseau sortant : la fonte doit venir de l'image, pas d'un CDN.
+    """
+    if not FONTS.is_dir():
+        return
+    out = STATIC / "fonts"
+    out.mkdir(parents=True, exist_ok=True)
+    for src in FONTS.iterdir():
+        dst = out / src.name
+        if not dst.exists() or dst.stat().st_size != src.stat().st_size:
+            shutil.copyfile(src, dst)
 
 
 def _serve_city() -> None:
