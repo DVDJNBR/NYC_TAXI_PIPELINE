@@ -3130,14 +3130,24 @@ function buildNav() {
   cam.position.set(NV3.POS[0] + NV3.DX, NV3.POS[1], NV3.POS[2]);
   cam.lookAt(NV3.LOOK[0] + NV3.DX, NV3.LOOK[1], NV3.LOOK[2]);
 
+  /* La maquette du GPS a ses deux thèmes, comme le reste de la tuile.
+     Elle était en clair seul : sur un tableau de bord sombre, une ville
+     blanche dans un écran noir est le seul objet qui ne suive pas la
+     page. Même ville, mêmes matières, quatre valeurs plus basses — et les
+     toits restent plus clairs que les joues, sinon le relief se perd. */
+  const NAVC = NIGHT
+    ? { sol: 0x1b1a21, rue: 0x2b2a35, joue: 0x393848, toit: 0x474655,
+        voie: 0x8fb2e4 }
+    : { sol: 0xd9d6d0, rue: 0xefedea, joue: 0xe6e3de, toit: 0xf4f2ee,
+        voie: 0x6f93c4 };
   const matGround = new THREE.MeshStandardMaterial({
-    color: w3Srgb(0xd9d6d0), roughness: 1.0 });
+    color: w3Srgb(NAVC.sol), roughness: 1.0 });
   const matRoad = new THREE.MeshStandardMaterial({
-    color: w3Srgb(0xefedea), roughness: 0.98 });
+    color: w3Srgb(NAVC.rue), roughness: 0.98 });
   const matSide = new THREE.MeshStandardMaterial({
-    color: w3Srgb(0xe6e3de), roughness: 0.95 });
+    color: w3Srgb(NAVC.joue), roughness: 0.95 });
   const matRoof = new THREE.MeshStandardMaterial({
-    color: w3Srgb(0xf4f2ee), roughness: 0.95 });
+    color: w3Srgb(NAVC.toit), roughness: 0.95 });
 
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), matGround);
   ground.rotation.x = -Math.PI / 2;
@@ -3210,7 +3220,7 @@ function buildNav() {
      qu'un interstice entre deux fronts bâtis, et tout ce qui s'y passe est
      masqué. */
   const matRoute = new THREE.MeshStandardMaterial({
-    color: w3Srgb(0x6f93c4), roughness: 0.5 });
+    color: w3Srgb(NAVC.voie), roughness: 0.5 });
   const ribbon = new THREE.Mesh(
     new THREE.BoxGeometry(NV3.RW, 0.09, 1), matRoute);
   ribbon.position.set(NV3.RX, 0.1, 0);
@@ -3244,8 +3254,11 @@ function buildNav() {
 
   /* Lumière de maquette : un ciel large et doux, une clé qui pose les
      ombres. Sur du blanc, une clé trop forte brûle les toits et la ville
-     perd son relief. */
-  const key = new THREE.DirectionalLight(0xffffff, 1.25);
+     perd son relief ; sur du sombre, c'est l'inverse — l'ombre portée ne
+     se voit plus sur un sol déjà noir, et c'est la clé qui doit détacher
+     les façades. Elle est donc chaude et un peu plus franche la nuit. */
+  const key = new THREE.DirectionalLight(
+    NIGHT ? 0xffeccb : 0xffffff, NIGHT ? 1.4 : 1.25);
   key.position.set(-70, 110, 60);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
@@ -3257,7 +3270,9 @@ function buildNav() {
   key.shadow.camera.far = 300;
   key.shadow.bias = -0.0016;
   scene.add(key);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9a968e, 0.82));
+  scene.add(NIGHT
+    ? new THREE.HemisphereLight(0x5d5a78, 0x13121a, 0.62)
+    : new THREE.HemisphereLight(0xffffff, 0x9a968e, 0.82));
 
   let W = 0, H = 0;
   const draw = () => {
@@ -4971,9 +4986,8 @@ function timeKey() {
     + 'background:linear-gradient(90deg,' + st[0] + ',' + st[1] + ','
     + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
     + ' min, médiane du pas</span>'
-    + '<span style="opacity:.78">un chapelet par trajet, au départ du'
-    + ' secteur · chaque taxi roule à la durée de sa course · survolez une'
-    + ' zone pour partir d\'ailleurs</span>';
+    + '<span style="opacity:.7">survolez une zone pour changer de'
+    + ' départ</span>';
   el.style.color = (CFG.head && CFG.head.dim) || C.dim;
   /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
      légende des secteurs en prenait deux, et les pastilles qui se rangent
@@ -5466,11 +5480,19 @@ async function boot() {
                   doubleClickZoom: true, touchZoom: true, keyboard: false },
     effects: (deck.LightingEffect && deck.DirectionalLight
               && deck.AmbientLight)
+      /* De nuit la rasante porte le dessin : c'est elle qui allume une
+         face sur deux et laisse l'autre dans l'ombre. À 0,55 les deux
+         faces recevaient presque autant de lumière, les arêtes
+         disparaissaient et la ville redevenait un aplat. Chaude, aussi :
+         une lumière froide sur des façades mauves les rend grises. */
       ? [new deck.LightingEffect({
-          amb: new deck.AmbientLight({ color: [246, 244, 252],
-                                       intensity: 0.95 }),
-          key: new deck.DirectionalLight({ color: [248, 246, 255],
-                 intensity: 0.55, direction: [-1.1, -2.2, -2.0] }) })]
+          amb: new deck.AmbientLight({
+                 color: NIGHT ? [255, 248, 234] : [246, 244, 252],
+                 intensity: NIGHT ? 1.02 : 0.95 }),
+          key: new deck.DirectionalLight({
+                 color: NIGHT ? [255, 240, 212] : [248, 246, 255],
+                 intensity: NIGHT ? 1.85 : 0.55,
+                 direction: [-1.1, -2.2, -2.0] }) })]
       : [],
     layers: [],
   });
@@ -6121,12 +6143,6 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  /* Le repère du présent : un trait vertical discret, sous les barres. */
-  ctx.strokeStyle = C.rule;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(nx, top - 6); ctx.lineTo(nx, base + 4);
-  ctx.stroke();
 }
 </script>
 """

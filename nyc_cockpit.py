@@ -120,5 +120,4 @@ def render():
             # qu'un titre vide fait retirer la barre de titre, et le dessin
             # monterait alors de huit pixels avant de redescendre.
             title="Volume de courses par heure",
-            hint="Le présent est sur le trait ; le passé file à gauche.",
         )
