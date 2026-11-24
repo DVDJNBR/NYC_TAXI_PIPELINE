@@ -4234,6 +4234,18 @@ _CITY = r"""
                  opacity: 0.6; }
   #signs .dot { width: 3px; height: 3px; margin-top: -1px;
                 border-radius: 50%; background: currentColor; }
+  /* De jour, tout s'inverse : le halo éclaircit au lieu d'assombrir, le
+     voile est clair, et l'encre devient sombre. Sans cela l'étiquette
+     restait ivoire sur un sol beige. */
+  #signs.day .sign { text-shadow: 0 0 3px rgba(248,246,242,0.95),
+                                  0 0 6px rgba(248,246,242,0.85),
+                                  0 1px 2px rgba(248,246,242,0.9); }
+  #signs.day .card { background: rgba(248,246,242,0.46); }
+  #signs.day .from { color: rgba(46,44,60,0.58); }
+  #signs.day .from i { color: rgba(46,44,60,0.42); }
+  #signs.day .to { color: rgba(24,22,34,0.95); }
+  #signs.day .min { color: rgba(40,38,52,0.82); }
+  #signs.day .min b { color: rgba(40,38,52,0.52); }
 </style>
 <script>
 /* Deux mille six cents gratte-ciel posent le sol, et au-dessus la carte
@@ -4909,8 +4921,8 @@ function timeKey() {
     + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
     + ' min, médiane du pas</span>'
     + '<span style="opacity:.78">un chapelet par trajet, au départ du'
-    + ' secteur · le taxi marque le milieu du parcours · survolez une zone'
-    + ' pour partir d\'ailleurs</span>';
+    + ' secteur · chaque taxi roule à la durée de sa course · survolez une'
+    + ' zone pour partir d\'ailleurs</span>';
   el.style.color = (CFG.head && CFG.head.dim) || C.dim;
   /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
      légende des secteurs en prenait deux, et les pastilles qui se rangent
@@ -5089,6 +5101,7 @@ function signHost() { return document.getElementById("signs"); }
 function paintSigns() {
   const host = signHost();
   if (!host) { return; }
+  if (!NIGHT) { host.className = "day"; }
   const want = {};
   for (const r of ROUTES) { want[r.s] = r; }
   for (const k of Object.keys(SIGNS)) {
