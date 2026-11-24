@@ -20,10 +20,14 @@ COPY nyc_cockpit.py nyc_content.py nyc_dashboard.py nyc_lang.py \
 # au démarrage — contours des 263 zones, maquette de la ville — est
 # versionnée avec le dépôt (exception dans .gitignore) et arrive donc par
 # le `git pull` du déploiement, à travers ce montage.
-# Les trois scripts que l'entrypoint peut avoir à lancer au premier
-# démarrage : le téléchargement, les agrégats journaliers, les cycles.
+# Les quatre scripts que l'entrypoint peut avoir à lancer au premier
+# démarrage : le téléchargement, les agrégats journaliers, les cycles, et
+# les courses de la maquette. K manquait à la liste alors que l'entrypoint
+# l'appelle juste après J — d'où un « can't open file
+# '/app/scripts/K_city_trips.py' » à chaque reconstruction des cycles, en
+# production seulement.
 COPY scripts/B_load_local_parquet.py scripts/G_build_aggregates.py \
-     scripts/J_build_cycles.py scripts/
+     scripts/J_build_cycles.py scripts/K_city_trips.py scripts/
 COPY .streamlit/ .streamlit/
 COPY assets/ assets/
 COPY docker/entrypoint.sh /entrypoint.sh
