@@ -100,8 +100,6 @@ def render():
         nyc_live.taxi_city(
             height=H_PLANS,
             title="Le temps de trajet depuis un secteur",
-            hint="Le sol se colore du plus proche au plus lointain en temps ;"
-                 " la voiture met d'autant plus longtemps que le trajet dure.",
             legend=True,
         )
 

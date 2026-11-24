@@ -463,6 +463,26 @@ def meta() -> dict:
                   DUR_CYCLE.stat().st_mtime)
 
 
+def _stamp() -> str:
+    """Empreinte des fichiers statiques, à coller en fin d'URL.
+
+    Les trois fichiers que le composant télécharge gardent le même nom d'une
+    version à l'autre. Le navigateur sert donc son exemplaire en cache à du
+    code neuf — et un recalcul des agrégats ne se voit pas, même après un
+    rechargement forcé, parce que l'iframe est une page à part et que son
+    cache ne suit pas toujours celui de la page hôte.
+
+    Le nom reste le même, l'adresse change : la taille des trois fichiers
+    suffit à distinguer deux calculs, et ne coûte aucune lecture.
+    """
+    try:
+        n = [(STATIC / f).stat().st_size
+             for f in ("nyc_live.json", "nyc_live.bin", "nyc_city.json")]
+    except OSError:
+        return "0"
+    return format(n[0] * 1000003 ^ n[1] * 10007 ^ n[2], "x")[-8:]
+
+
 def _serve_city() -> None:
     """Pose la maquette de ville dans static/, si elle n'y est pas déjà.
 
@@ -487,6 +507,7 @@ def _cfg(**extra) -> str:
     return json.dumps({
         "channel": _channel(),
         "mode": nyc_theme.mode(),
+        "stamp": _stamp(),
         "colors": {
             "bg": p["BG_PAGE"], "ink": p["TEXT_LIGHT"], "dim": p["TEXT_DIM"],
             "rule": p["RULE"], "accent": p["ACCENT"], "panel": p["BG_PANEL"],
@@ -766,6 +787,15 @@ function staticBase() {
   } catch (e) { return "/app/static/"; }
 }
 
+/* Les fichiers gardent leur nom, l'adresse porte l'empreinte du calcul :
+   deux versions ont deux URL, et le navigateur ne peut plus servir
+   l'ancienne. Sans cela, un recalcul des agrégats restait invisible
+   derrière le cache, et du code neuf lisait des données périmées. */
+function staticUrl(name) {
+  const v = CFG.stamp || "";
+  return staticBase() + name + (v ? "?v=" + v : "");
+}
+
 let META = null, BIN = null, Z = 0, READY = false;
 /* Table des séries : SERIES[cycle][mesure] est un Uint16Array de Z x pas,
    rangé zone par zone. L'ordre de lecture suit celui de l'écriture côté
@@ -814,9 +844,8 @@ function scaled(z, step, scope, measure) {
 }
 
 async function load() {
-  const base = staticBase();
-  META = await (await fetch(base + "nyc_live.json")).json();
-  BIN = await (await fetch(base + "nyc_live.bin")).arrayBuffer();
+  META = await (await fetch(staticUrl("nyc_live.json"))).json();
+  BIN = await (await fetch(staticUrl("nyc_live.bin"))).arrayBuffer();
   Z = META.zones.length;
   let offset = 0;
   for (const scope of Object.keys(META.cycles)) {
@@ -5190,9 +5219,11 @@ function staticLayers() {
       const k = LIFT_K[0] + LIFT_K[1] * t;
       /* Les façades laissent passer un peu du sol : la ville se pose
          sur la carte au lieu de la masquer, et un itinéraire qui passe
-         derrière une tour ne disparaît pas tout à fait. */
+         derrière une tour ne disparaît pas tout à fait. Un peu, et pas
+         plus : à 212 les tours de nuit perdaient leur éclat, le sol
+         sombre traversant les façades claires. */
       return [g[0] + (LIFT[0] - g[0]) * k, g[1] + (LIFT[1] - g[1]) * k,
-              g[2] + (LIFT[2] - g[2]) * k, 212];
+              g[2] + (LIFT[2] - g[2]) * k, 238];
     },
     /* L'ambiante et la rasante additionnées dépassaient 1 : les toits
        saturaient en blanc quelle que soit leur couleur de base. */
@@ -5383,7 +5414,7 @@ const SHORT = ["Downtown", "Midtown", "Uptown", "Harlem", "Queens",
                "Brooklyn", "Bronx", "SI", "EWR"];
 
 async function boot() {
-  CITY = await (await fetch(staticBase() + "nyc_city.json")).json();
+  CITY = await (await fetch(staticUrl("nyc_city.json"))).json();
   TINT = CITY.order.map(name => {
     const c = rgb(META.areaColors[name] || C.dim);
     return [SLAB[0] + (c[0] - SLAB[0]) * MUTE,
