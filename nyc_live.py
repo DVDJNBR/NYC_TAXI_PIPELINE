@@ -1,4 +1,4 @@
-"""Les blocs animés du cockpit — ils vivent dans le navigateur, pas en Python.
+"""Les blocs animés du dashboard — ils vivent dans le navigateur, pas en Python.
 
 Streamlit ne sait pas rejouer un cycle à l'écran : chaque image demanderait
 un aller-retour serveur et une réexécution complète du script, soit deux ou
@@ -73,7 +73,7 @@ ZONE_CYCLE = ROOT / "data" / "aggregates" / "zone_cycle.parquet"
 OD_CYCLE = ROOT / "data" / "aggregates" / "od_cycle.parquet"
 DUR_CYCLE = ROOT / "data" / "aggregates" / "dur_cycle.parquet"
 
-CHANNEL = "nyc-cockpit"
+CHANNEL = "nyc-live"
 
 
 def _channel() -> str:
@@ -88,14 +88,14 @@ def _channel() -> str:
     navigateur : les cinq composants d'une même page partagent donc leur
     canal, et deux pages ne se parlent pas.
     """
-    key = "_cockpit_channel"
+    key = "_live_channel"
     if key not in st.session_state:
         st.session_state[key] = uuid.uuid4().hex[:8]
     return f"{CHANNEL}-{st.session_state[key]}"
 
 # Deux mesures, pas trois. La distance moyenne a été retirée du sélecteur :
 # elle ne variait que de x1,41 sur la journée, contre x10,7 pour les courses
-# et x9,9 pour les revenus, et un cockpit dont le principe est que tout
+# et x9,9 pour les revenus, et un dashboard dont le principe est que tout
 # bouge au même pas accueille mal une mesure qui ne bouge pas. Elle était
 # aussi la seule des trois à n'être pas une quantité mais une moyenne, ce
 # qui lui valait un titre à part, une repondération dans le ruban et une
@@ -550,7 +550,7 @@ def _head(title: str, hint: str = "", **extra) -> dict:
 
 def controls(height: int = 160, scope: str = "hour",
              measure: str = "trips") -> None:
-    """Les boutons-panneaux et l'horloge du cockpit."""
+    """Les boutons-panneaux et l'horloge du dashboard."""
     meta()
     st.iframe(
         _html(_controls_body(), _cfg(scope=scope, measure=measure)),
@@ -928,7 +928,7 @@ __BODY__
 # Composant 1 — les boutons-panneaux, et l'horloge
 # ---------------------------------------------------------------------------
 def _controls_body() -> str:
-    """Les boutons du cockpit, en signalisation de voie rapide.
+    """Les boutons du dashboard, en signalisation de voie rapide.
 
     Ce sont eux qui disent où l'on va dans les données : la mesure à gauche,
     le pas du cycle à droite. De jour ils prennent la signalisation qu'on lit
@@ -2255,7 +2255,7 @@ _KPIS = r"""
    Le nom de zone, lui, n'est pas un nombre : il ne compte pas, il se croise
    sur place. */
 /* Deux cases, une seule règle : elles doivent bouger dans le cycle. Un
-   nombre qui ne bouge pas n'appartient pas au cockpit, il appartient à la
+   nombre qui ne bouge pas n'appartient pas au dashboard, il appartient à la
    fiche signalétique — et la fiche est maintenant en pied de page.
 
    Les titres sont ceux d'une légende, pas d'un article : ils disent ce qui
@@ -2280,7 +2280,7 @@ _KPIS = r"""
 
    La seconde porte la vitesse de la ville, en compteur. C'est un rapport et
    non un compte, donc un autre genre de mesure que l'anneau d'au-dessus :
-   les deux cases ne se redisent pas. Et c'est le seul chiffre du cockpit
+   les deux cases ne se redisent pas. Et c'est le seul chiffre du dashboard
    qu'un lecteur peut vérifier contre son propre souvenir de la ville — elle
    roule à 21,0 mph à 5 h et à 10,1 mph à 17 h, et s'effondre de 11 h à 18 h
    sans se relever.
@@ -4678,7 +4678,7 @@ function mainNode(s) {
 
    Interpolés entre deux pas et non pris au pas courant. Le ruban glisse,
    les cadrans glissent ; une carte dont les durées sautaient d'un coup à
-   chaque changement de pas jurait avec le reste du cockpit. Les minutes
+   chaque changement de pas jurait avec le reste du dashboard. Les minutes
    montent donc graduellement, et la couleur des tracés avec elles.
 
    La médiane et non la moyenne : la distribution des durées penche à
@@ -5480,19 +5480,14 @@ async function boot() {
                   doubleClickZoom: true, touchZoom: true, keyboard: false },
     effects: (deck.LightingEffect && deck.DirectionalLight
               && deck.AmbientLight)
-      /* De nuit la rasante porte le dessin : c'est elle qui allume une
-         face sur deux et laisse l'autre dans l'ombre. À 0,55 les deux
-         faces recevaient presque autant de lumière, les arêtes
-         disparaissaient et la ville redevenait un aplat. Chaude, aussi :
-         une lumière froide sur des façades mauves les rend grises. */
+      /* Une seule lumière, de jour comme de nuit : la maquette de ville est
+         une carte et non une scène, et c'est le ruban qui porte la nuit.
+         Une rasante propre à la nuit avait été posée ici par erreur. */
       ? [new deck.LightingEffect({
-          amb: new deck.AmbientLight({
-                 color: NIGHT ? [255, 248, 234] : [246, 244, 252],
-                 intensity: NIGHT ? 1.02 : 0.95 }),
-          key: new deck.DirectionalLight({
-                 color: NIGHT ? [255, 240, 212] : [248, 246, 255],
-                 intensity: NIGHT ? 1.85 : 0.55,
-                 direction: [-1.1, -2.2, -2.0] }) })]
+          amb: new deck.AmbientLight({ color: [246, 244, 252],
+                                       intensity: 0.95 }),
+          key: new deck.DirectionalLight({ color: [248, 246, 255],
+                 intensity: 0.55, direction: [-1.1, -2.2, -2.0] }) })]
       : [],
     layers: [],
   });
@@ -5837,9 +5832,20 @@ function villeBlock(x, y, w, hh, m, a) {
    de la façade. La nuit, la façade devient un semis de points ; le jour,
    elle ne porte qu'un reflet de ciel. */
 function travees(x, y, w, hh, idx, m, a) {
-  if (w < 9 || hh < 12) { return; }
+  /* La trame se resserre quand la face est étroite, au lieu de s'éteindre.
+     Le pas de 2,6 a été réglé sur une maquette large de 543 pixels, où la
+     face fait quinze pixels. Le bloc du dashboard en fait moins de quatre
+     cents sur un écran étroit, la face tombe à sept, et sous l'ancien
+     seuil de neuf la façade et la joue perdaient toutes leurs lumières
+     d'un coup — c'est ce qu'on voyait en production. Une tour éteinte
+     n'est pas une tour vue de loin, c'est une tour sans nuit. */
+  const etroit = w < 9;
+  /* Le jour garde son seuil : une façade claire ne porte qu'un reflet, et
+     à cette largeur le reflet et ses meneaux ne seraient que du bruit. La
+     nuit descend plus bas, parce qu'une lumière, elle, se voit encore. */
+  if (w < (NIGHT ? 5 : 9) || hh < (NIGHT ? 10 : 12)) { return; }
   const n = Math.max(2, Math.round(w / 5.2));
-  const pad = 1.6;
+  const pad = etroit ? 0.8 : 1.6;
   const inner = w - pad * 2;
   const bwT = inner / n;
   let k;
@@ -5872,7 +5878,7 @@ function travees(x, y, w, hh, idx, m, a) {
        La lumière est pâle et non ambre : un blanc chaud à 40 de saturation,
        et un blanc froid de tube fluorescent une fois sur sept. L'orange
        saturé d'une photo surexposée n'est pas ce qu'on voit à l'œil. */
-    const pasH = 2.6, pasV = 2.8;
+    const pasH = etroit ? 1.9 : 2.6, pasV = etroit ? 2.3 : 2.8;
     const cols = Math.max(1, Math.floor(inner / pasH));
     const lignes = Math.max(1, Math.floor((hh - 3.5) / pasV));
     const regime = hash(idx, 41, 7) % 5;

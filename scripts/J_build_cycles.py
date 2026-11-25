@@ -1,6 +1,6 @@
 """Profils cycliques : la journée, la semaine et l'année types.
 
-Le cockpit ne rejoue pas une chronologie, il tourne en boucle sur un cycle.
+Le dashboard ne rejoue pas une chronologie, il tourne en boucle sur un cycle.
 Trois cycles, exclusifs l'un de l'autre :
 
     hour     24 pas, minuit -> minuit, tous jours confondus
@@ -8,8 +8,8 @@ Trois cycles, exclusifs l'un de l'autre :
     month    12 pas, janvier -> décembre, heures confondues
 
 Aucun cycle ne porte l'heure dans son pas. La semaine l'a portée un temps —
-168 pas — pour garder le cycle jour/nuit visible d'un jour à l'autre, mais le
-cockpit avançait alors d'un pas toutes les 243 ms et ses instruments ne se
+168 pas — pour garder le cycle jour/nuit visible d'un jour à l'autre, mais la
+page avançait alors d'un pas toutes les 243 ms et ses instruments ne se
 lisaient plus. Un pas de « mardi » moyenne donc ses vingt-quatre heures, et
 le cycle jour/nuit se lit dans le cycle de la journée, qui est fait pour lui.
 Voir le commentaire de STEPS.
@@ -22,7 +22,7 @@ seule. Un total ferait chuter la fin d'année de moitié, pour une raison de
 comptage et non de trafic. Le dénominateur est le nombre de jours
 réellement observés pour chaque pas, lu dans daily.parquet.
 
-Trois tables en sortie, toutes lues par les composants du cockpit :
+Trois tables en sortie, toutes lues par les composants du dashboard :
 
     data/aggregates/zone_cycle.parquet   zone x 43 pas x 15 colonnes
     data/aggregates/od_cycle.parquet     flux entre secteurs x 43 pas,
@@ -80,7 +80,7 @@ DUR_BINS, DUR_WIDTH = 31, 120
 # l'heure creuse de la zone, et jusqu'à 171,2 pour la zone 138. Un pas
 # journalier dessine donc deux zones de moyennes voisines comme des jumelles.
 #
-# Ce que cela coûtait est tout aussi réel : 168 pas font un cockpit qui
+# Ce que cela coûtait est tout aussi réel : 168 pas font un dashboard qui
 # change d'état quatre fois par seconde, et aucun de ses instruments ne se
 # lit à ce rythme. Le cycle de la journée porte l'heure, et c'est là qu'on
 # regarde l'heure ; la semaine compare des journées entières.
@@ -247,7 +247,7 @@ def dur_cycle(con) -> pd.DataFrame:
     """Distribution des durées de course, par cycle et par pas.
 
     Bacs de deux minutes jusqu'à une heure, puis un bac de débordement : la
-    case du cockpit trace cette distribution et la compare à la moyenne du
+    case du dashboard trace cette distribution et la compare à la moyenne du
     cycle. Un seul nombre n'y suffisait pas — la médiane ne passe que de 11 à
     15 minutes sur la journée, alors que la part au-delà d'une demi-heure est
     multipliée par 5,3 et celle au-delà d'une heure par 46. C'est la queue

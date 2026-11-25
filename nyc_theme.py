@@ -203,7 +203,7 @@ _GRID_LINE = {"dark": "rgba(255,255,255,0.07)", "light": "rgba(0,0,0,0.08)"}
 
 # La brique de New York, à côté du jaune du taxi. Streamlit n'a pas d'option
 # pour une seconde couleur de marque : celle-ci est donc dérivée ici, comme
-# GRID_LINE. Elle sert aux feux arrière des boutons du cockpit — un phare
+# GRID_LINE. Elle sert aux feux arrière des boutons du dashboard — un phare
 # éclaire devant, un feu rouge se voit derrière, et c'est la seule place où
 # un rouge n'annonce pas une mauvaise nouvelle.
 _BRICK = {"dark": "#c05f41", "light": "#a8503a"}
@@ -264,7 +264,7 @@ def palette() -> dict:
 def materials() -> dict:
     """Les matières de la navigation, prêtes à servir hors de Streamlit.
 
-    La barre latérale et les boutons du cockpit commandent la même chose et
+    La barre latérale et les boutons du dashboard commandent la même chose et
     doivent donc se ressembler : tôle verte et joncs chromés de jour, chrome
     et faisceau ambré de nuit. Les recettes vivent ici en constantes privées ;
     cette fonction les expose pour les composants, qui vivent dans des iframes
@@ -959,7 +959,7 @@ def inject_css():
             animation: nyc-arrow 0.2s ease-out;
         }}
         /* Le jaune est celui du taxi : il reste aux taxis, sur la carte, et
-           aux lampes du cockpit, qui sont des feux. La navigation, elle, se
+           aux lampes du dashboard, qui sont des feux. La navigation, elle, se
            marque à l'encre et à la brique — sinon l'accent est partout et ne
            désigne plus rien. */
         .st-key-navbar [data-testid="stRadioOption"]:has(input:checked) p {{

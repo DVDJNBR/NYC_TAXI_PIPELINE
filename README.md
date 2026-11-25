@@ -147,7 +147,8 @@ SQL/
 nyc_taxi_pipeline/          # Projet dbt Core
 reports/                    # Analyses et graphiques
 streamlit_dashboard_local.py# Dashboard web (DuckDB sur les Parquet)
-nyc_dashboard.py            # Rendu du dashboard, partagé
+nyc_dashboard.py            # Barre de navigation, chargement, pied de page
+nyc_grid.py                 # La page du dashboard : la grille et ses blocs
 nyc_content.py              # Onglets À propos et Pipeline de données
 nyc_theme.py                # Thème visuel et composants
 tasks.py                    # Commandes Invoke

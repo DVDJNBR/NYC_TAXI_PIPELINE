@@ -1,6 +1,6 @@
 """Géométrie des zones TLC et série quotidienne par zone, pour la carte.
 
-Deux sorties, toutes deux lues par le cockpit :
+Deux sorties, toutes deux lues par le dashboard :
 
     data/reference/taxi_zones.json   contours et centroïdes des 263 zones
 

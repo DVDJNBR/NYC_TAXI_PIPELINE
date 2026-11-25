@@ -11,7 +11,7 @@ Structure de l'interface :
     [bandeau]   Dashboard · À propos · Pipeline de données | logo + titre |
                 thème | langue
 
-Le dashboard est une grille unique — le cockpit — et non plus quatre sections
+Le dashboard est une grille unique et non plus quatre sections
 à parcourir. Une barre latérale pour trois entrées prenait une colonne entière
 pour ne rien dire : les onglets sont passés dans le bandeau, où ils tiennent
 sur une ligne et rendent sa largeur à la grille.
@@ -24,7 +24,7 @@ import streamlit as st
 
 import nyc_content
 import nyc_lang
-import nyc_cockpit
+import nyc_grid
 import nyc_theme
 
 # Le logo sert à la fois de favicon et de marque dans la barre. Chemin absolu
@@ -45,28 +45,27 @@ PAGE_CONFIG = dict(
 # valeur à `?vue=` et de clé de traduction (`nav.` + la clé). Un lien partagé
 # reste donc valide quelle que soit la langue de celui qui l'ouvre, et le code
 # ne compare jamais du texte affiché.
-# « cockpit » est le nom interne de la vue, pas son intitulé : la valeur
-# d'URL, elle, est lue par un visiteur. D'où `dashboard`, qui dit la même
-# chose que l'onglet. Un lien d'avant le changement, `?vue=cockpit`, n'est
-# plus dans VIEWS : _index le rejette et rend DEFAULT_SECTION, qui est cette
-# vue-ci. L'ancien lien ouvre donc la bonne page.
-PAGE_COCKPIT  = "dashboard"
+# La valeur d'URL est lue par un visiteur : elle dit `dashboard`, comme
+# l'onglet. Un lien d'avant le changement de nom n'est plus dans VIEWS :
+# _index le rejette et rend DEFAULT_SECTION, qui est cette vue-ci.
+# L'ancien lien ouvre donc la bonne page.
+PAGE_DASHBOARD  = "dashboard"
 PAGE_ABOUT    = "about"
 PAGE_PIPELINE = "pipeline"
 
 
-# Une seule liste pour la barre : le cockpit, puis les pages de contexte. Le
+# Une seule liste pour la barre : le dashboard, puis les pages de contexte. Le
 # CSS distingue les deux groupes en visant les options au-delà de la première
 # — d'où N_PRIMARY, qui doit rester accordé.
 #
-# Les quatre sections ont quitté la navigation : le cockpit les a remplacées.
+# Les quatre sections ont quitté la navigation : le dashboard les a remplacées.
 # Elles posaient seize figures côte à côte, chacune répondant à sa question
-# dans son coin ; le cockpit en pose quatre qui répondent ensemble, au même
+# dans son coin ; le dashboard en pose quatre qui répondent ensemble, au même
 # pas de la même journée. Leur code reste dans nyc_views, il n'est plus
 # atteignable depuis la barre.
-VIEWS = [PAGE_COCKPIT, PAGE_ABOUT, PAGE_PIPELINE]
+VIEWS = [PAGE_DASHBOARD, PAGE_ABOUT, PAGE_PIPELINE]
 N_PRIMARY = 1
-DEFAULT_SECTION = PAGE_COCKPIT
+DEFAULT_SECTION = PAGE_DASHBOARD
 
 # ---------------------------------------------------------------------------
 # Interface
@@ -94,7 +93,7 @@ def run(load_data):
         st.title("NYC Yellow Taxi")
         nyc_content.render_pipeline_tab()
     else:
-        nyc_cockpit.render()
+        nyc_grid.render()
 
     _footer(daily)
 
@@ -164,8 +163,8 @@ def _footer(daily):
     """Provenance et amplitude, sur une ligne, en bas à droite.
 
     Ces nombres situent les données, ils ne les racontent pas : en tête de
-    page ils prenaient de la hauteur au-dessus de ce qu'ils décrivent, et le
-    cockpit perdait d'autant. En pied, ils se lisent quand on les cherche.
+    page ils prenaient de la hauteur au-dessus de ce qu'ils décrivent, et la
+    grille perdait d'autant. En pied, ils se lisent quand on les cherche.
 
     Ils voisinent avec la source parce qu'ils disent la même chose : ce que
     couvre le jeu de données, et d'où il vient.

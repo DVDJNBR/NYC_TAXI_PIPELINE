@@ -8,7 +8,7 @@ fi
 
 # Les sept tables que _read_aggregates() exige, nommées ici une par une.
 # La garde portait sur « au moins un .parquet dans le dossier », ce qui
-# était vrai dès que les agrégats du cockpit ou une version précédente du
+# était vrai dès que les agrégats du dashboard ou une version précédente du
 # dashboard existaient : le pré-calcul était sauté, _read_aggregates()
 # renvoyait None faute des trois dernières tables, et chaque session
 # rescannait les 1,3 Go de Parquet bruts sans aboutir — un chargement en
@@ -21,9 +21,9 @@ for table in daily hourly zones profile congestion revenue_split payment; do
     fi
 done
 
-# Les agrégats du cockpit sont d'une autre fabrication que ceux du
+# Les agrégats du dashboard sont d'une autre fabrication que ceux du
 # dashboard : ils croisent la zone et le pas du cycle, et c'est J qui les
-# écrit, après G. Sans eux le cockpit n'affiche que son message d'absence,
+# écrit, après G. Sans eux le dashboard n'affiche que son message d'absence,
 # ce qui en production revient à une page vide.
 #
 # La garde porte aussi sur le contenu de zone_cycle, et pas seulement sur
@@ -36,7 +36,7 @@ done
 # Elle compte aussi les pas du cycle dow. Ils sont passés de 7 à 168 en
 # version 11, puis sont revenus à 7 en version 17 : un pas de 243 ms ne se
 # lisait plus. Une table de la version 11 a les bonnes colonnes et le mauvais
-# nombre de pas — elle passerait donc la garde du schéma, et le cockpit
+# nombre de pas — elle passerait donc la garde du schéma, et le dashboard
 # lirait 168 pas là où il en attend sept. Seules deux colonnes sont lues.
 #
 # dur_cycle.parquet est la troisième table, écrite par le même script depuis
@@ -75,17 +75,17 @@ sys.exit(0)
     needs_cycles=1
 fi
 if [ "$needs_cycles" = 1 ]; then
-    echo "Pré-calcul des cycles du cockpit (une seule fois, ~2min)..."
+    echo "Pré-calcul des cycles du dashboard (une seule fois, ~2min)..."
     python scripts/G_build_aggregates.py
     python scripts/J_build_cycles.py
     # Les matrices de flux de la maquette sortent des mêmes agrégats : les
     # reconstruire ensemble, sinon la carte montrerait la version livrée
-    # avec l'image pendant que le reste du cockpit lirait la neuve.
+    # avec l'image pendant que le reste du dashboard lirait la neuve.
     python scripts/K_city_trips.py
 fi
 
 # La maquette de ville, posée avant le premier visiteur. _serve_city() la
-# copie aussi, mais depuis Python, donc seulement quand un rendu du cockpit
+# copie aussi, mais depuis Python, donc seulement quand un rendu du dashboard
 # appelle meta() : jusque-là static/ est vide et la carte n'a pas ses tours.
 # Le conteneur recrée static/ à chaque démarrage, d'où la copie ici plutôt
 # qu'une vérification d'existence. cp -f et non cp -n : la source versionnée
@@ -93,7 +93,7 @@ fi
 mkdir -p /app/static
 cp -f /app/data/reference/nyc_city.json /app/static/nyc_city.json 2>/dev/null || true
 
-# Pré-calcul du cockpit avant d'accepter des visiteurs. Sans lui, le premier
+# Pré-calcul du dashboard avant d'accepter des visiteurs. Sans lui, le premier
 # visiteur après chaque démarrage attendait que meta() écrive static/
 # (une trentaine de secondes sur le VPS, page grise pendant ce temps). Le
 # tampon que meta() pose dans static/ évite ensuite à la session Streamlit de

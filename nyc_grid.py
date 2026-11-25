@@ -1,4 +1,4 @@
-"""Le cockpit — une page, une horloge, cinq blocs qui répondent ensemble.
+"""Le dashboard — une page, une horloge, cinq blocs qui répondent ensemble.
 
 Ce n'est pas une page de graphiques posés côte à côte : c'est une seule
 machine. Un cycle tourne — la journée, la semaine ou l'année type — et tout
@@ -68,7 +68,7 @@ H_CADRANS = 262
 def render():
     if not nyc_live.available():
         st.info(
-            "Les agrégats du cockpit sont absents. Les construire :\n\n"
+            "Les agrégats du dashboard sont absents. Les construire :\n\n"
             "```\npython scripts/H_build_geo.py\n"
             "python scripts/J_build_cycles.py\n```"
         )
