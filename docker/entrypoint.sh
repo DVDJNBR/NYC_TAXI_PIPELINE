@@ -92,6 +92,7 @@ fi
 # fait foi, une copie laissée par un conteneur précédent peut être périmée.
 mkdir -p /app/static
 cp -f /app/data/reference/nyc_city.json /app/static/nyc_city.json 2>/dev/null || true
+cp -f /app/data/reference/nyc_routes.json /app/static/nyc_routes.json 2>/dev/null || true
 
 # Pré-calcul du dashboard avant d'accepter des visiteurs. Sans lui, le premier
 # visiteur après chaque démarrage attendait que meta() écrive static/

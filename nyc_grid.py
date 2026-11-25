@@ -90,16 +90,19 @@ def render():
     # blocs qui montrent la même chose font croire à deux mesures. Elle
     # porte maintenant le temps de trajet, qui n'était nulle part et qu'elle
     # seule peut montrer en géographie.
-    trips, city = st.columns([2, 3], gap="medium")
+    # La clé sert au CSS de nyc_theme : cette bande prend la hauteur
+    # d'écran que les autres laissent, H_PLANS n'est que la valeur de départ.
+    with st.container(key="dash_plans"):
+        trips, city = st.columns([2, 3], gap="medium")
     with trips:
         nyc_live.flows(
             height=H_PLANS,
-            title="Les échanges de courses entre secteurs",
+            title="Courses par heure entre secteurs",
         )
     with city:
         nyc_live.taxi_city(
             height=H_PLANS,
-            title="Le temps de trajet depuis un secteur",
+            title="Temps de trajet médian (min)",
             legend=True,
         )
 
@@ -119,5 +122,5 @@ def render():
             # son premier état, avec la mesure allumée. Il reste ici parce
             # qu'un titre vide fait retirer la barre de titre, et le dessin
             # monterait alors de huit pixels avant de redescendre.
-            title="Volume de courses par heure",
+            title="Courses par heure",
         )

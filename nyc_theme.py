@@ -686,6 +686,41 @@ def inject_css():
         /* Rappel de périmètre : une ligne sous le titre, assez discrète pour
            ne pas concurrencer les indicateurs qui suivent. Remonte contre le
            titre — Streamlit laisse sinon un blanc qui la détache du bloc. */
+        /* Le dashboard tient dans la hauteur de l'écran, sans défilement.
+           Seule la bande des plans (Sankey et carte) s'étire : les
+           commandes et les cadrans ont une hauteur de dessin fixe — à moins
+           de 262 px la jante du volant est rognée. Partie fixe : bandeau
+           70, commandes 70, cadrans 262, pied 16, marge basse 8, et quatre
+           écarts de 16 entre les cinq rangs = 490 px. Sous 300 px la carte
+           ne se lit plus : la page défile plutôt que de l'écraser.
+
+           Les trois éléments vides en tête (le style injecté, le relanceur
+           du thème, le bandeau en position fixe) ne mesurent rien mais
+           prenaient chacun un écart de 16 px du flux : sortis du flux, ils
+           rendent 48 px. Le trait au-dessus du pied disparaît de cette
+           page, le pied reste. */
+        .block-container:has(.st-key-dash_plans) {{
+            padding-bottom: 8px !important;
+        }}
+        .block-container:has(.st-key-dash_plans) > [data-testid="stVerticalBlock"] > :is(
+            .stElementContainer:has(style),
+            [data-testid="stLayoutWrapper"]:has(> .st-key-theme_rerun),
+            [data-testid="stLayoutWrapper"]:has(> .st-key-band)) {{
+            position: absolute;
+        }}
+        .block-container:has(.st-key-dash_plans) > [data-testid="stVerticalBlock"]
+            > .stElementContainer:has(hr) {{
+            display: none;
+        }}
+        /* L'élément qui porte l'iframe a sa propre taille, celle passée à
+           st.iframe, en hauteur et en flex-basis : sans les deux, l'iframe
+           rétrécit et la bande reste à 440. */
+        .st-key-dash_plans .stElementContainer:has(iframe),
+        .st-key-dash_plans iframe {{
+            height: max(300px, calc(100dvh - 490px)) !important;
+            flex-basis: auto !important;
+        }}
+
         /* Pied de page : la provenance et l'amplitude, alignées à droite.
            Elles ferment la page au lieu de la précéder. */
         .page-foot {{

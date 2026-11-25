@@ -64,6 +64,11 @@ GEO = ROOT / "data" / "reference" / "taxi_zones.json"
 # Sans cette copie, le conteneur de production n'a pas de tours : le fichier
 # n'existait que dans static/, qui est hors du dépôt.
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
+# Les itinéraires routiers entre les nœuds de la carte : chemin le plus court
+# en voiture, calculé une fois par OSRM sur OpenStreetMap pour les 72 couples
+# (tracé « Routeur direct » de l'artefact Variations de tracé). Export unique,
+# versionné comme la maquette. Clé : "lon,lat|lon,lat" à cinq décimales.
+ROUTES = ROOT / "data" / "reference" / "nyc_routes.json"
 # Les fontes des plaques vivent dans assets/, qui est versionné et copié
 # dans l'image ; static/ ne l'est ni l'un ni l'autre. Elles y étaient
 # déposées à la main, donc présentes en local et absentes en production —
@@ -512,13 +517,14 @@ def _serve_city() -> None:
     dedans elle n'avait lieu qu'au premier calcul. Un processus au cache
     chaud dont static/ vient d'être recréé se retrouvait alors sans tours.
     """
-    if not CITY.exists():
-        return
-    out = STATIC / "nyc_city.json"
-    if out.exists() and out.stat().st_size == CITY.stat().st_size:
-        return
-    STATIC.mkdir(exist_ok=True)
-    shutil.copyfile(CITY, out)
+    for src in (CITY, ROUTES):
+        if not src.exists():
+            continue
+        out = STATIC / src.name
+        if out.exists() and out.stat().st_size == src.stat().st_size:
+            continue
+        STATIC.mkdir(exist_ok=True)
+        shutil.copyfile(src, out)
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +669,10 @@ _SHELL = r"""
      mise en page et laisse le dessin occuper toute la surface. */
   #head { position: absolute; left: 0; top: 0; right: 0; z-index: 8;
           pointer-events: none; line-height: 1.3; }
-  #head b { display: block; font-size: 0.88rem; font-weight: 600; }
+  /* Même style que l'intitulé des KPI (.k-lab) : un seul registre de titre
+     sur toute la page. */
+  #head b { display: block; font-size: 0.64rem; font-weight: 400;
+            letter-spacing: 0.09em; text-transform: uppercase; }
   #head i { display: block; font-size: 0.72rem; font-style: normal; }
   /* La légende vit au bas de l'iframe, en surimpression, pour la même
      raison que le titre. Les deux blocs du bas portent la même : ce sont
@@ -699,7 +708,7 @@ let headMeasure = () => {};
   if (!CFG.head || !CFG.head.title) { HEAD_EL.remove(); return; }
   HEAD_EL.innerHTML = "<b>" + CFG.head.title + "</b>"
               + (CFG.head.hint ? "<i>" + CFG.head.hint + "</i>" : "");
-  HEAD_EL.querySelector("b").style.color = CFG.head.ink || C.ink;
+  HEAD_EL.querySelector("b").style.color = CFG.head.dim || C.dim;
   const hint = HEAD_EL.querySelector("i");
   if (hint) { hint.style.color = CFG.head.dim || C.dim; }
   headMeasure = () => { HEAD = HEAD_EL.offsetHeight + 8; };
@@ -735,8 +744,8 @@ function headTitle(text) {
    Les deux mesures sont des quantités horaires, donc elles partagent la
    même phrase d'unité. C'est ce qui reste après le retrait de la distance,
    qui était une moyenne et cassait la règle. */
-const MEASURE_TITLE = { trips: "Volume de courses par heure",
-                        revenue: "Revenus par heure" };
+const MEASURE_TITLE = { trips: "Courses par heure",
+                        revenue: "Revenus par heure ($)" };
 
 /* Pendant de HEAD, en bas. La légende se replie sur une, deux ou trois
    lignes selon la largeur du bloc, donc sa hauteur se mesure. Pas `FOOT` :
@@ -4364,11 +4373,6 @@ const ETALON_MS = 15000;
    ne change pas de longueur, elle roule deux fois moins vite. */
 const MIN_MS = 520;
 const ROUTE_N = 32;           /* points par voie                           */
-/* Le change entre une distance d'écran, qui se pense en pixels, et une
-   distance de carte, qui se mesure en degrés. Au cadrage du bloc, un degré
-   de la métrique du sol vaut environ trois mille huit cents pixels en
-   travers du trajet. */
-const DEG_PX = 1 / 3800;
 
 /* Distance d'une pastille à sa voie, en part de la longueur du trajet. Les
    minutes se lisent à côté du trait qu'elles décrivent, et non au bout :
@@ -4801,33 +4805,21 @@ function groundOf(s) {
   return [c[0], c[1], c[2], 34 + 72 * k];
 }
 
-/* Une voie d'itinéraire, aller ou retour.
+/* Une voie d'itinéraire : le chemin routier entre les deux nœuds.
 
-   Pas un segment droit : un trait tendu entre deux centres est un arc de
-   flux, et c'est précisément ce que ce bloc ne montre plus. La courbe est
-   une quadratique dont le point de contrôle est écarté de la corde et
-   poussé vers l'arrivée — l'asymétrie est ce qui la fait lire comme un
-   chemin et non comme une parabole.
-
-   Les deux sens prennent chacun leur voie, de part et d'autre de cette
-   courbe, comme les deux chaussées d'une avenue. Superposés, ils se
-   seraient masqués l'un l'autre et seule la durée du dessus se serait vue. */
-function lanePath(A, B, offPx) {
-  const dx = (B[0] - A[0]) * KLAT, dy = B[1] - A[1];
-  const len = Math.hypot(dx, dy) || 1e-6;
-  const px = -dy / len / KLAT, py = dx / len;
-  const bow = len * 0.19;
-  const off = offPx * DEG_PX;
-  const ax = A[0] + px * off, ay = A[1] + py * off;
-  const bx = B[0] + px * off, by = B[1] + py * off;
-  const cx = ax + (bx - ax) * 0.58 + px * bow;
-  const cy = ay + (by - ay) * 0.58 + py * bow;
+   Le tracé vient de ROADS, calculé par OSRM sur OpenStreetMap — il passe
+   par les ponts, les tunnels, le BQE, comme un taxi. Ce chemin sert au
+   dessin seulement, jamais à la durée : les minutes restent la médiane
+   mesurée. Faute d'itinéraire pour un couple, le segment droit. */
+let ROADS = {};
+const k5 = p => p[0].toFixed(5) + "," + p[1].toFixed(5);
+function lanePath(A, B) {
+  const g = ROADS[k5(A) + "|" + k5(B)];
+  if (g && g.length > 1) { return g.map(p => [p[0], p[1], ROAD_Z]); }
   const out = [];
   for (let k = 0; k < ROUTE_N; k++) {
     const u = k / (ROUTE_N - 1), w = 1 - u;
-    out.push([w * w * ax + 2 * w * u * cx + u * u * bx,
-              w * w * ay + 2 * w * u * cy + u * u * by,
-              ROAD_Z]);
+    out.push([w * A[0] + u * B[0], w * A[1] + u * B[1], ROAD_Z]);
   }
   return out;
 }
@@ -4903,7 +4895,7 @@ function build() {
    de l'aller est le chemin tout court. */
 function shapeLanes() {
   for (const r of ROUTES) {
-    const pa = lanePath(r.A, r.B, 0);
+    const pa = lanePath(r.A, r.B);
     r.ab.path = pa; r.ab.cum = cumLen(pa); r.ab.tie = tiePoint(pa);
     r.ab.at = pillSpot(r.A, r.B, 1);
   }
@@ -5451,6 +5443,9 @@ const SHORT = ["Downtown", "Midtown", "Uptown", "Harlem", "Queens",
 
 async function boot() {
   CITY = await (await fetch(staticUrl("nyc_city.json"))).json();
+  try {
+    ROADS = await (await fetch(staticUrl("nyc_routes.json"))).json();
+  } catch (e) { ROADS = {}; }
   TINT = CITY.order.map(name => {
     const c = rgb(META.areaColors[name] || C.dim);
     return [SLAB[0] + (c[0] - SLAB[0]) * MUTE,
@@ -6195,11 +6190,15 @@ function layout() {
   const padBot = pad + LEGH;
   const place = (list, side) => {
     const sum = list.reduce((a, b) => a + total[side + b], 0) || 1;
-    const usable = h - padTop - padBot - gap * (list.length - 1);
+    /* Le plancher de 8 px est pris sur le budget, pas ajouté par-dessus :
+       ajouté, il faisait déborder la colonne en bas dès que le bloc
+       raccourcit, et le dernier nœud sortait du cadre. */
+    const usable = Math.max(0, h - padTop - padBot - gap * (list.length - 1)
+                               - 8 * list.length);
     let y = padTop;
     const out = {};
     for (const b of list) {
-      const hh = Math.max(8, (total[side + b] / sum) * usable);
+      const hh = 8 + (total[side + b] / sum) * usable;
       out[b] = { y0: y, y1: y + hh, h: hh };
       y += hh + gap;
     }
