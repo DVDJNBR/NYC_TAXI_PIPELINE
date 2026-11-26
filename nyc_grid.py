@@ -102,7 +102,7 @@ def render():
     with city:
         nyc_live.taxi_city(
             height=H_PLANS,
-            title="Temps de trajet médian (min)",
+            title="Courses par heure entre zones",
             legend=True,
         )
 

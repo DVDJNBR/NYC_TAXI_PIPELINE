@@ -64,11 +64,8 @@ GEO = ROOT / "data" / "reference" / "taxi_zones.json"
 # Sans cette copie, le conteneur de production n'a pas de tours : le fichier
 # n'existait que dans static/, qui est hors du dépôt.
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
-# Les itinéraires routiers entre les nœuds de la carte : chemin le plus court
-# en voiture, calculé une fois par OSRM sur OpenStreetMap pour les 72 couples
-# (tracé « Routeur direct » de l'artefact Variations de tracé). Export unique,
-# versionné comme la maquette. Clé : "lon,lat|lon,lat" à cinq décimales.
-ROUTES = ROOT / "data" / "reference" / "nyc_routes.json"
+# Tous les trajets zone à zone, pour le champ de courants de la carte.
+FLOWS = ROOT / "data" / "reference" / "nyc_flows.json"
 # Les fontes des plaques vivent dans assets/, qui est versionné et copié
 # dans l'image ; static/ ne l'est ni l'un ni l'autre. Elles y étaient
 # déposées à la main, donc présentes en local et absentes en production —
@@ -166,7 +163,7 @@ def available() -> bool:
 # Numéro de forme du payload. Il entre dans la clé du cache : sans lui, un
 # changement de structure ne serait pas vu tant que les agrégats ne sont pas
 # reconstruits, et le composant lirait un fichier à l'ancien format.
-PAYLOAD_VERSION = 18
+PAYLOAD_VERSION = 19
 
 
 @st.cache_data(show_spinner=False)
@@ -278,9 +275,9 @@ def _air(od: pd.DataFrame, scope: str, steps: int) -> dict:
     moyen de paiement, la zone de départ et celle d'arrivée sont renseignées
     partout. Cette case n'a donc pas de base à déclarer.
     """
-    air = nyc_zones.AIRPORT_AREA
+    air = list(nyc_zones.AIRPORT_AREAS)
     part = od[od["SCOPE"] == scope]
-    pu, do = part["PU_AREA"] == air, part["DO_AREA"] == air
+    pu, do = part["PU_AREA"].isin(air), part["DO_AREA"].isin(air)
     g = part.assign(
         FROM=part["TOTAL_TRIPS"].where(pu, 0.0),
         TO=part["TOTAL_TRIPS"].where(do & ~pu, 0.0),
@@ -517,7 +514,7 @@ def _serve_city() -> None:
     dedans elle n'avait lieu qu'au premier calcul. Un processus au cache
     chaud dont static/ vient d'être recréé se retrouvait alors sans tours.
     """
-    for src in (CITY, ROUTES):
+    for src in (CITY, FLOWS):
         if not src.exists():
             continue
         out = STATIC / src.name
@@ -754,23 +751,12 @@ const MEASURE_TITLE = { trips: "Courses par heure",
    tomber le composant entier. */
 let LEGH = 0;
 const LEG_EL = document.getElementById("legend");
-/* Le secteur des aéroports en porte trois, et il n'en vaut que deux. Cumulé
-   sur les vingt-quatre pas du cycle de la journée : JFK 5 119 courses à
-   l'heure, LaGuardia 3 382, Newark 3,3 — soit 60,2 %, 39,8 % et 0,04 % du
-   secteur. Les taxis jaunes ne chargent pas à Newark, qui est hors de l'État
-   de New York : trois courses sur 8 504.
-
-   La légende nomme donc les deux qui comptent. « Airports » laissait croire
-   à un secteur à trois portes, alors que la carte n'en dessine que deux —
-   et qu'elle a raison de n'en dessiner que deux. Le nom du secteur lui-même
-   ne change pas : il est écrit dans les agrégats, où il est une clé. */
-const AREA_SHOW = { Airports: "Airports · JFK + LGA" };
 
 function drawLegend() {
   if (!CFG.legend || !META.areas) { LEG_EL.remove(); return; }
   LEG_EL.innerHTML = META.areas.map(n =>
     '<span><i style="background:' + (META.areaColors[n] || C.dim)
-    + '"></i>' + (AREA_SHOW[n] || n) + "</span>").join("");
+    + '"></i>' + n + "</span>").join("");
   LEG_EL.style.color = (CFG.head && CFG.head.dim) || C.dim;
   const measure = () => { LEGH = LEG_EL.offsetHeight + 8; };
   measure();
@@ -4258,7 +4244,33 @@ function frame() {
 _CITY = r"""
 <script src="https://unpkg.com/deck.gl@8.9.36/dist.min.js"></script>
 <div id="city" style="position:absolute; inset:0;"></div>
-<div id="signs" style="position:absolute; inset:0; pointer-events:none;
+<div id="flowkey" style="position:absolute; right:10px; top:10px; z-index:9;
+     display:none; flex-direction:column; align-items:flex-end; gap:5px;
+     font:11px 'Source Sans Pro', system-ui, sans-serif; color:#e8e6e3;">
+  <div class="fk-seg"><button data-d="leger">Léger</button><button data-d="doux">Doux</button><button data-d="moyen">Moyen</button><button data-d="dense">Dense</button></div>
+  <div class="fk-seg"><button data-v="54">Relief</button><button data-v="30">Mi-relief</button><button data-v="0">À plat</button></div>
+  <div class="fk-scale"></div>
+</div>
+<style>
+  #flowkey .fk-seg { display:inline-flex; border:1px solid rgba(232,230,227,.25); border-radius:5px; overflow:hidden;
+                     background:rgba(18,16,14,.75); }
+  #flowkey button { font:inherit; padding:3px 9px; border:0; background:transparent; color:#8b8794; cursor:pointer; }
+  #flowkey button[aria-pressed="true"] { background:#e8e6e3; color:#12100e; }
+  /* La rampe de couleur cachait le nom du Bronx ; la clé du bas dit déjà ce que vaut la clarté. */
+  #flowkey .fk-scale { display:none; align-items:center; gap:6px; background:rgba(18,16,14,.75);
+                       padding:3px 7px; border-radius:4px; color:#b5b0a8; }
+  #flowkey .fk-scale i { display:block; width:64px; height:6px; border-radius:2px; }
+</style>
+<script>
+var PITCH = 30;
+document.querySelectorAll("#flowkey button").forEach(b => b.onclick = () => {
+  if (b.dataset.m) { FLOWMODE = b.dataset.m; }
+  if (b.dataset.d) { setDose(b.dataset.d); }
+  if (b.dataset.v) { PITCH = +b.dataset.v; deckgl.setProps({ initialViewState: fitted() }); }
+  flowKey();
+});
+</script>
+<div id="signs" style="display:none; position:absolute; inset:0; pointer-events:none;
      overflow:hidden;"></div>
 <style>
   /* L'étiquette d'un trajet.
@@ -4419,35 +4431,20 @@ const ARROW_DEG = 1 / 4000;
 const VIEWBEAR = -29;
 const KLAT = Math.cos(40.75 * Math.PI / 180);
 
-/* Les sept secteurs dessinés. Staten Island en est absent — six courses par
-   jour — et « Airports » aussi, mais pour une autre raison : JFK, LaGuardia
-   et Newark sont à trente-cinq kilomètres les uns des autres, et un centre
-   de gravité entre eux tomberait dans la baie. Le volume de ce secteur est
-   donc réparti entre deux nœuds de dessin, JFK et LaGuardia, au prorata
-   mesuré de chaque pas — il bouge : JFK prend 97 % des départs à 5 h et 40 %
-   à 10 h. Newark n'en est pas : les taxis jaunes n'y chargent pas, trois
-   courses sur toute la période. */
+/* Les sept secteurs dessinés par un sol. Staten Island en est absent — six
+   courses par jour. JFK et LaGuardia sont deux secteurs de plus, sans sol :
+   leur zone tombe dans le polygone du Queens. Ils ont un nœud chacun, que
+   la maquette range après ses neuf secteurs (CITY.air.node), et leurs
+   indices prennent la suite : AIRS. Newark n'en est pas — les taxis jaunes
+   n'y chargent pas, trois courses sur toute la période. */
 const SECTORS = [0, 1, 2, 3, 4, 5, 6];
-let AIRSEC = -1, AIRNODE = [];
+let AIRNODE = [], AIRS = [];
 
 /* La position d'un nœud. Les neuf secteurs la lisent dans CITY.lonlat, les
    deux aéroports dans CITY.air : leurs indices prennent la suite. */
 function nodeAt(i) {
   return i < CITY.lonlat.length ? CITY.lonlat[i]
                                 : AIRNODE[i - CITY.lonlat.length].lonlat;
-}
-
-/* Un secteur développé en nœuds de dessin et en poids. Tout secteur vaut
-   pour lui-même ; celui des aéroports vaut pour deux. */
-function spread(s) {
-  if (s !== AIRSEC || !AIRNODE.length) { return [[s, 1]]; }
-  const sh = CITY.air.share[S.scope] || CITY.air.share.hour;
-  const w = sh[((S.step % sh.length) + sh.length) % sh.length];
-  const out = [];
-  for (let k = 0; k < AIRNODE.length; k++) {
-    if (w[k] > 0) { out.push([AIRNODE[k].pool, w[k]]); }
-  }
-  return out.length ? out : [[AIRNODE[0].pool, 1]];
 }
 
 /* Le ruban et la carte nomment les mêmes neuf zones : ils en prennent donc
@@ -4625,19 +4622,66 @@ function arrowAtlas() {
   return c;
 }
 const ATLAS = arrowAtlas();
+/* Les feux du taxi : un petit arc devant (phares), un derrière (feux
+   arrière). Deux icônes en masque, centrées sur le taxi, que deck.gl
+   colore et tourne avec le cap. */
+function lightsAtlas() {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 64;
+  const g = c.getContext("2d");
+  g.strokeStyle = "#fff"; g.lineWidth = 7; g.lineCap = "round";
+  g.beginPath(); g.arc(32, 32, 22, -0.75, 0.75); g.stroke();
+  g.beginPath(); g.arc(96, 32, 22, Math.PI - 0.75, Math.PI + 0.75); g.stroke();
+  return c;
+}
+const LIGHTS = lightsAtlas();
+/* Le taxi vu de dessus, en un seul pictogramme rond, cap vers la droite :
+   une caisse, sa bordure épaisse de même couleur, deux arcs pris dans la
+   bordure (phares devant, feux derrière) et le panneau TAXI en barre au
+   milieu. La nuit : caisse sombre, panneau et feux allumés, un halo minuscule
+   devant et derrière. Le jour : caisse jaune, tout éteint. */
+function taxiAtlas() {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 64;
+  const g = c.getContext("2d");
+  const draw = (ox, night) => {
+    const cx = ox + 32, cy = 32, body = night ? "#9a6f08" : "#f7b500";
+    if (night) {
+      const halo = (x, r, rgb, a) => {
+        const h = g.createRadialGradient(x, cy, 0, x, cy, r);
+        h.addColorStop(0, `rgba(${rgb},${a})`); h.addColorStop(1, `rgba(${rgb},0)`);
+        g.fillStyle = h; g.beginPath(); g.arc(x, cy, r, 0, Math.PI * 2); g.fill();
+      };
+      halo(cx + 22, 9, "255,248,220", 0.55);
+      halo(cx - 22, 7, "240,50,40", 0.45);
+    }
+    g.fillStyle = body; g.beginPath(); g.arc(cx, cy, 15, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 6; g.lineCap = "butt";
+    g.strokeStyle = body; g.beginPath(); g.arc(cx, cy, 17, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = night ? "#fffbe6" : "#cfc9bb";
+    g.beginPath(); g.arc(cx, cy, 17, -0.62, 0.62); g.stroke();
+    g.strokeStyle = night ? "#ff3b30" : "#7a2430";
+    g.beginPath(); g.arc(cx, cy, 17, Math.PI - 0.55, Math.PI + 0.55); g.stroke();
+    g.fillStyle = night ? "#ffe680" : "#5c4a1c";
+    g.fillRect(cx - 3, cy - 9, 6, 18);
+  };
+  draw(0, true); draw(64, false);
+  return c;
+}
+const TAXIS = taxiAtlas();
+const TAXIS_MAP = { night: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: false },
+                    day: { x: 64, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: false } };
+const LIGHTS_MAP = { front: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true },
+                     rear: { x: 64, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } };
 const MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64,
                            anchorX: 32, anchorY: 32, mask: true },
                   taxi: { x: 64, y: 0, width: 64, height: 64,
                           anchorX: 32, anchorY: 32, mask: false } };
 
-/* Les aéroports ne sont pas un secteur de la maquette : JFK et LaGuardia
-   tombent dans le polygone du Queens, Newark est hors cadre. Mais le ruban
-   les montre maintenant à part, et 7 % des courses y passent — un repère
-   sur la carte est ce qui relie les deux lectures. Un anneau, trois lettres,
-   dans la couleur du nœud. */
-const AIR_CODE = { "JFK Airport": "JFK", "LaGuardia Airport": "LGA",
-                   "Newark Airport": "EWR" };
-let AIRPORTS = [], AIR_RGB = [120, 120, 130];
+/* Les repères des deux aéroports : un anneau, trois lettres, dans la
+   couleur du secteur. Ils n'ont pas de sol à survoler, c'est donc l'anneau
+   qui reçoit le survol et fait d'eux le départ. */
+let AIRPORTS = [];
 
 /* Le gris des marqueurs de direction. Ils sont le tracé : assez clairs
    pour se détacher du sol de nuit, assez éteints pour que la ville reste
@@ -4654,22 +4698,10 @@ let deckgl = null, VIEWSTATE = null, LABEL_POS = null, started = 0;
 let FOCUS = 1, SECNAME = [], ROUTES = [], TMIN = 0, TMAX = 1, BAND = {};
 let SIG = "";
 
-/* Le secteur d'un index, au nom qu'emploient les agrégats. La maquette
-   nomme son neuvième secteur « EWR », là où les agrégats disent
-   « Airports » : c'est le même secteur, et c'est le nom des agrégats qui
-   sert de clé entre les deux. */
+/* Le secteur d'un index, au nom qu'emploient les agrégats : les neuf de la
+   maquette, puis les aéroports. */
 function secNames() {
-  return CITY.order.map((n, i) => (i === AIRSEC ? "Airports" : n));
-}
-
-/* Le nœud de dessin qui porte un secteur. Les aéroports en ont deux, et
-   c'est le plus chargé du pas qui l'emporte : JFK prend 97 % des départs à
-   5 h et 40 % à 10 h, donc l'itinéraire change de bout dans la journée. */
-function mainNode(s) {
-  const list = spread(s);
-  let best = list[0];
-  for (const q of list) { if (q[1] > best[1]) { best = q; } }
-  return best[0];
+  return CITY.order.concat(AIRNODE.map(n => n.area));
 }
 
 /* Les temps de trajet entre le secteur de départ et les autres, dans les
@@ -4791,31 +4823,16 @@ function bandOf(s) { return BAND[s]; }
    La teinte de secteur reste dessous : on reconnaît toujours Brooklyn de
    Queens, mais c'est leur clarté qui dit lequel est près. */
 function groundOf(s) {
-  if (s === FOCUS) {
-    const a = rgb(C.accent);
-    return [a[0], a[1], a[2], 74];
-  }
-  const u = bandOf(s);
-  if (u === undefined) { return [TINT[s][0], TINT[s][1], TINT[s][2], 22]; }
-  const k = 1 - Math.max(0, Math.min(1, u));
-  const t = TINT[s];
-  const c = [t[0] + (LIFT[0] - t[0]) * 0.34 * k,
-             t[1] + (LIFT[1] - t[1]) * 0.34 * k,
-             t[2] + (LIFT[2] - t[2]) * 0.34 * k];
-  return [c[0], c[1], c[2], 34 + 72 * k];
+  const t = TINT[s] || [60, 60, 60];
+  return [t[0], t[1], t[2], 30];
 }
 
-/* Une voie d'itinéraire : le chemin routier entre les deux nœuds.
+/* Une voie d'itinéraire : le segment droit entre les deux nœuds.
 
-   Le tracé vient de ROADS, calculé par OSRM sur OpenStreetMap — il passe
-   par les ponts, les tunnels, le BQE, comme un taxi. Ce chemin sert au
-   dessin seulement, jamais à la durée : les minutes restent la médiane
-   mesurée. Faute d'itinéraire pour un couple, le segment droit. */
-let ROADS = {};
-const k5 = p => p[0].toFixed(5) + "," + p[1].toFixed(5);
+   Droit, et non courbe ni routier. La courbe se lisait comme un vol
+   d'oiseau, et le chemin routier faisait passer la carte pour un GPS qui
+   connaîtrait l'itinéraire réel : elle ne connaît que la durée médiane. */
 function lanePath(A, B) {
-  const g = ROADS[k5(A) + "|" + k5(B)];
-  if (g && g.length > 1) { return g.map(p => [p[0], p[1], ROAD_Z]); }
   const out = [];
   for (let k = 0; k < ROUTE_N; k++) {
     const u = k / (ROUTE_N - 1), w = 1 - u;
@@ -4860,7 +4877,7 @@ function build() {
   }
   const around = timesAround(SECNAME[FOCUS]);
   const vol = linkVolumes(SECNAME[FOCUS]);
-  const dests = (AIRSEC >= 0 ? SECTORS.concat([AIRSEC]) : SECTORS)
+  const dests = SECTORS.concat(AIRS)
     .filter(s => {
       const d = around[SECNAME[s]], t = vol[SECNAME[s]];
       return s !== FOCUS && d && d.ab && d.ba
@@ -4872,11 +4889,11 @@ function build() {
      voitures en même temps, une fois par seconde et demie. */
   const was = {};
   for (const r of ROUTES) { was[r.s] = [r.ab.p, r.ab.tp]; }
-  const A = nodeAt(mainNode(FOCUS));
+  const A = nodeAt(FOCUS);
   ROUTES = dests.map(s => {
     const k = was[s] || [Math.random(), Math.random()];
     return {
-      s: s, name: SECNAME[s], A: A, B: nodeAt(mainNode(s)),
+      s: s, name: SECNAME[s], A: A, B: nodeAt(s),
       /* `p` est la phase du chapelet, `tp` celle de la voiture : elles
          avancent au même rythme mais pas ensemble, sinon la voiture reste
          posée sur un triangle pour toujours. */
@@ -4950,6 +4967,7 @@ function refresh(force) {
    Sortir de la ville ne remet rien à zéro — la carte garde le dernier
    secteur touché, ce qui est ce qu'on veut en lâchant la souris. */
 function setFocus(s) {
+  return;   // le survol de secteur est retiré : la carte montre toute la ville
   if (!(s >= 0) || s === FOCUS || !canFocus(s)) { return; }
   FOCUS = s;
   build();
@@ -4971,15 +4989,10 @@ function setFocus(s) {
 function timeKey() {
   const el = document.getElementById("legend");
   if (!el || !CFG.legend) { return; }
-  const st = CFG.ramp;
   el.innerHTML =
-    '<span style="font-weight:600">Depuis ' + SECNAME[FOCUS] + '</span>'
-    + '<span><i style="width:72px;height:7px;border-radius:2px;'
-    + 'background:linear-gradient(90deg,' + st[0] + ',' + st[1] + ','
-    + st[2] + ')"></i>' + Math.round(TMIN) + ' à ' + Math.round(TMAX)
-    + ' min, médiane du pas</span>'
-    + '<span style="opacity:.7">survolez une zone pour changer de'
-    + ' départ</span>';
+    '<span style="font-weight:600">Champ de courants des taxis</span>'
+    + '<span>deux sens côte à côte, on roule à droite · clarté : courses/h qui passent</span>'
+    + '<span><b style="color:#5ea9b5">bleu</b> : aéroports</span>';
   el.style.color = (CFG.head && CFG.head.dim) || C.dim;
   /* La hauteur est reprise : la clé du temps tient sur une ligne là où la
      légende des secteurs en prenait deux, et les pastilles qui se rangent
@@ -5237,6 +5250,16 @@ function staticLayers() {
        celle du premier pas et du premier secteur de départ. */
     updateTriggers: { getFillColor: [SIG] },
   }));
+  /* Le contour du secteur de départ, par-dessus les tours : le sol teinté
+     seul se perdait sous les bâtiments de Manhattan, et l'on ne voyait pas
+     d'où partaient les trajets. */
+  out.push(new deck.PolygonLayer({
+    id: "focus-edge", data: CITY.polys.filter(d => d.s === FOCUS),
+    filled: false, stroked: true, pickable: false,
+    getPolygon: d => d.p, lineWidthUnits: "pixels", getLineWidth: 2.4,
+    getLineColor: rgb(C.accent).concat([235]),
+    parameters: { depthTest: false },
+  }));
   out.push(new deck.PolygonLayer({
     id: "buildings", data: CITY.bld, extruded: true, filled: true,
     pickable: false,
@@ -5276,7 +5299,7 @@ function staticLayers() {
      l'épaissir. Il prend le jaune du taxi, qui est la couleur de ce qui
      nous concerne. */
   out.push(new deck.ScatterplotLayer({
-    id: "focus-halo", data: [nodeAt(mainNode(FOCUS))], pickable: false,
+    id: "focus-halo", data: [nodeAt(FOCUS)], pickable: false,
     getPosition: d => [d[0], d[1], ROAD_Z + 14],
     radiusUnits: "pixels", getRadius: 15,
     stroked: true, filled: true, lineWidthUnits: "pixels",
@@ -5286,7 +5309,7 @@ function staticLayers() {
     parameters: { depthTest: false },
   }));
   out.push(new deck.ScatterplotLayer({
-    id: "focus", data: [nodeAt(mainNode(FOCUS))], pickable: false,
+    id: "focus", data: [nodeAt(FOCUS)], pickable: false,
     getPosition: d => [d[0], d[1], ROAD_Z + 18],
     radiusUnits: "pixels", getRadius: 8.4,
     stroked: true, filled: true, lineWidthUnits: "pixels",
@@ -5307,7 +5330,7 @@ function staticLayers() {
     id: "zone-text", data: SECTORS,
     getPosition: a => {
       const p = LABEL_POS[a] || CITY.lonlat[a];
-      return [p[0], p[1], ALT + 340];
+      return [p[0], p[1], ALT + LABEL_LIFT];
     },
     getText: a => SPACED[a], getSize: 10.5, sizeUnits: "pixels",
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontWeight: 700,
@@ -5315,7 +5338,7 @@ function staticLayers() {
     outlineWidth: 3.4,
     outlineColor: NIGHT ? [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 215]
                         : [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 222],
-    getColor: NIGHT ? [214, 210, 230, 235] : [72, 68, 94, 230],
+    getColor: NIGHT ? [214, 210, 230, 240] : [72, 68, 94, 235],
     parameters: { depthTest: false },
   }));
   if (AIRPORTS.length) {
@@ -5324,78 +5347,272 @@ function staticLayers() {
          destination qui ne touche pas les autres et la plus lointaine en
          temps. Son repère est donc plus grand qu'un centre de secteur, et
          plein, pour qu'on le trouve avant de lire les trois lettres. */
-      id: "air-ring", data: AIRPORTS, pickable: false,
+      id: "air-ring", data: AIRPORTS, pickable: true,
+      onHover: info => { if (info && info.object) { setFocus(info.object.s); } },
       getPosition: d => [d.lon, d.lat, ALT + 160],
-      radiusUnits: "pixels", getRadius: 7.6,
+      radiusUnits: "pixels", getRadius: d => (d.s === FOCUS ? 10 : 7.6),
       stroked: true, filled: true, lineWidthUnits: "pixels",
       getFillColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 210],
-      getLineWidth: 2,
-      getLineColor: [AIR_RGB[0], AIR_RGB[1], AIR_RGB[2], 225],
+      getLineWidth: d => (d.s === FOCUS ? 3.4 : 2),
+      getLineColor: d => (d.s === FOCUS ? rgb(C.accent).concat([255])
+                                        : d.rgb.concat([225])),
+      updateTriggers: { getRadius: [FOCUS], getLineWidth: [FOCUS],
+                        getLineColor: [FOCUS] },
       parameters: { depthTest: false },
     }));
     out.push(new deck.TextLayer({
       id: "air-text", data: AIRPORTS, pickable: false,
-      getPosition: d => [d.lon, d.lat, ALT + 160],
+      getPosition: d => [d.lon, d.lat, ALT + LABEL_LIFT],
       getText: d => d.code, getSize: 10.5, sizeUnits: "pixels",
-      getPixelOffset: [0, -14],
       fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif",
       fontWeight: 700,
       fontSettings: { sdf: true, fontSize: 64, buffer: 10 },
       outlineWidth: 3.2,
       outlineColor: [SCENE_BG[0], SCENE_BG[1], SCENE_BG[2], 222],
-      getColor: [AIR_RGB[0], AIR_RGB[1], AIR_RGB[2], 245],
+      getColor: d => d.rgb.concat([245]),
       parameters: { depthTest: false },
     }));
   }
   return out;
 }
 
-function layers() {
-  const out = STATIC.slice();
-  if (!RIDE) { return out; }
-  /* Le train de chevrons de chaque voie. Il dit le sens à l'arrêt, sur une
-     image fixe, ce qu'une voiture seule ne faisait pas, et il dit la durée
-     par sa vitesse.
+let ZC = {}, OD = [], VMAX = 1, DIR = [], DMAX = 1, PARTS = [], LOOP = 60, TRIPLAYER = null, FLOWMODE = "amber", FLOWLAYER = null, FLOWKEY = "";
+const F_DEP = [79, 195, 247], F_ARR = [255, 173, 66], F_ONE = [255, 196, 92];
+const F_DUR = [[4, [255, 244, 170]], [12, [255, 173, 66]], [25, [236, 84, 92]],
+               [45, [176, 62, 196]], [70, [110, 70, 220]]];
+function durRgb(m) {
+  if (m <= F_DUR[0][0]) { return F_DUR[0][1]; }
+  for (let i = 1; i < F_DUR.length; i++) {
+    if (m <= F_DUR[i][0]) {
+      const [a, ca] = F_DUR[i - 1], [b, cb] = F_DUR[i], t = (m - a) / (b - a);
+      return ca.map((c, k) => Math.round(c + (cb[k] - c) * t));
+    }
+  }
+  return F_DUR[F_DUR.length - 1][1];
+}
+/* Toutes les courses, en traits droits posés sur la ville. La lumière
+   s'additionne : là où beaucoup de trajets se superposent, la carte
+   s'éclaire. Les trajets qui partent du secteur survolé gardent leur pleine
+   lumière ; les autres restent en fond, au tiers. */
+/* Le champ de courants, dans les deux sens.
 
-     billboard: false le pose à plat sur le plan du sol : il tourne avec la
-     carte au lieu de rester face à l'écran, donc son cap suit la route. */
-  out.push(new deck.IconLayer({
-    id: "ride", iconAtlas: ATLAS, iconMapping: MAPPING,
-    data: RIDE.items, pickable: false,
-    getPosition: d => d.p, getAngle: d => d.a,
-    getColor: d => d.c,
-    getIcon: d => d.i, sizeUnits: "pixels", getSize: d => d.s,
-    billboard: false, parameters: { depthTest: false },
-    updateTriggers: { getPosition: RIDE.items, getAngle: RIDE.items,
-                      getColor: RIDE.items, getSize: RIDE.items,
-                      getIcon: RIDE.items },
+   Un champ unique additionne les directions : l'aller et le retour
+   s'annulent, et JFK (198 départs/h, 40 arrivées/h) ne coulait que vers
+   Manhattan. Ici chaque case garde huit champs, un par cap (tranches de
+   45°). Un trajet ne pousse que le champ de son cap ; deux flux opposés
+   restent donc séparés. Chaque particule choisit un cap à sa naissance et
+   le suit. Elle roule à droite de son axe, comme une voiture : l'aller et le
+   retour coulent côte à côte au lieu de se superposer.
+
+   La couleur est celle du quartier de départ dominant dans la case et le
+   cap : d'où viennent les taxis qui passent là. */
+const FB = { w: -74.06, s: 40.56, e: -73.70, n: 40.93 };
+const FD_LAT = 0.0025, FD_LON = FD_LAT / Math.cos(40.73 * Math.PI / 180);
+const F_BINS = 8, F_LANE = 0.0011;          // ~120 m à droite de l'axe
+let FGW = 0, FGH = 0, FVX = null, FVY = null, FM = null, FMAX = 1, FCUM = null, FACC = 0;
+let FPARTS = [], FTICK = 0, DENS = null, FSEC = null, FSECN = [], FSECRGB = [];
+/* Trois dosages : nombre de lignes, longueur de traîne, épaisseur et
+   intensité. Le jaune seul ; la lumière s'additionne là où le flux est dense. */
+const DOSES = {
+  leger: { n: 1800, trail: 7, w: 0.6, a: 0.55 },
+  moyen: { n: 3600, trail: 9, w: 0.8, a: 0.8 },
+  doux: { n: 2700, trail: 8, w: 0.7, a: 0.68 },
+  dense: { n: 6500, trail: 12, w: 1.0, a: 1.0 },
+};
+let DOSE = "doux", F_N = DOSES.doux.n, F_TRAIL = DOSES.doux.trail;
+function setDose(k) {
+  DOSE = k; F_N = DOSES[k].n; F_TRAIL = DOSES[k].trail;
+  if (!FCUM) { return; }
+  while (FPARTS.length > F_N) { FPARTS.pop(); }
+  while (FPARTS.length < F_N) { const p = {}; fspawn(p); p.age = Math.random() * p.life; FPARTS.push(p); }
+}
+
+function buildField() {
+  FGW = Math.ceil((FB.e - FB.w) / FD_LON); FGH = Math.ceil((FB.n - FB.s) / FD_LAT);
+  const C1 = FGW * FGH, NB = F_BINS;
+  FSECN = secNames();
+  const NS = FSECN.length, sidx = {};
+  FSECN.forEach((n, k) => { sidx[n] = k; });
+  FSECRGB = FSECN.map(n => rgb((META.areaColors || {})[n] || C.dim));
+  let vx = [], vy = [], m = [];
+  for (let b = 0; b < NB; b++) { vx.push(new Float32Array(C1)); vy.push(new Float32Array(C1)); m.push(new Float32Array(C1)); }
+  FSEC = new Float32Array(C1 * NB * NS);
+  const DW = FGW * 2, DH = FGH * 2, dg = new Float32Array(DW * DH);
+  for (const f of DIR) {
+    const a = ZC[f[0]], b = ZC[f[1]], v = f[2];
+    const dx = (b[0] - a[0]) / FD_LON, dy = (b[1] - a[1]) / FD_LAT, L = Math.hypot(dx, dy);
+    if (L < 0.5) { continue; }
+    const ux = dx / L, uy = dy / L, n = Math.ceil(L * 2);
+    const bin = ((Math.round(Math.atan2(uy, ux) / (2 * Math.PI / NB)) % NB) + NB) % NB;
+    const sk = sidx[a[2]];
+    for (let k = 0; k <= n; k++) {
+      const lon = a[0] + (b[0] - a[0]) * k / n, lat = a[1] + (b[1] - a[1]) * k / n;
+      const i = Math.floor((lon - FB.w) / FD_LON), j = Math.floor((lat - FB.s) / FD_LAT);
+      if (i >= 0 && j >= 0 && i < FGW && j < FGH) {
+        const q = j * FGW + i, w = v * L / (n + 1);
+        vx[bin][q] += ux * w; vy[bin][q] += uy * w; m[bin][q] += w;
+        if (sk !== undefined) { FSEC[(q * NB + bin) * NS + sk] += w; }
+      }
+      const di = Math.floor((lon - FB.w) / FD_LON * 2), dj = Math.floor((lat - FB.s) / FD_LAT * 2);
+      if (di >= 0 && dj >= 0 && di < DW && dj < DH) { dg[dj * DW + di] += v; }
+    }
+  }
+  const blur = arr => {
+    const o = new Float32Array(arr.length);
+    for (let j = 0; j < FGH; j++) {
+      for (let i = 0; i < FGW; i++) {
+        let t = 0, c = 0;
+        for (let bj = -1; bj <= 1; bj++) {
+          for (let bi = -1; bi <= 1; bi++) {
+            const x = i + bi, y = j + bj;
+            if (x >= 0 && y >= 0 && x < FGW && y < FGH) { t += arr[y * FGW + x]; c++; }
+          }
+        }
+        o[j * FGW + i] = t / c;
+      }
+    }
+    return o;
+  };
+  for (let b = 0; b < NB; b++) {
+    for (let r = 0; r < 2; r++) { vx[b] = blur(vx[b]); vy[b] = blur(vy[b]); m[b] = blur(m[b]); }
+  }
+  FVX = vx; FVY = vy; FM = m;
+  FMAX = 0;
+  for (let b = 0; b < NB; b++) { for (const x of m[b]) { if (x > FMAX) { FMAX = x; } } }
+  // Naissances au prorata du volume de chaque couple case × cap.
+  FCUM = new Float32Array(C1 * NB); FACC = 0;
+  for (let q = 0; q < C1; q++) {
+    // Puissance 0,85 et non racine : les caps minoritaires naissaient trop souvent et
+    // la carte se hérissait de traits dans tous les sens.
+    for (let b = 0; b < NB; b++) { FACC += Math.pow(m[b][q], 0.85); FCUM[q * NB + b] = FACC; }
+  }
+  for (let k = 0; k < F_N; k++) { const p = {}; fspawn(p); p.age = Math.random() * p.life; FPARTS.push(p); }
+
+  let dmax = 0; for (const x of dg) { if (x > dmax) { dmax = x; } }
+  const cv = document.createElement("canvas"); cv.width = DW; cv.height = DH;
+  const g = cv.getContext("2d"), img = g.createImageData(DW, DH), lm = Math.log(1 + dmax * 3);
+  for (let j = 0; j < DH; j++) {
+    for (let i = 0; i < DW; i++) {
+      const v = dg[j * DW + i]; if (!v) { continue; }
+      const t = Math.log(1 + v * 3) / lm, o = ((DH - 1 - j) * DW + i) * 4;
+      img.data[o] = 120 + 135 * t; img.data[o + 1] = 60 + 120 * t; img.data[o + 2] = 20 + 40 * t;
+      img.data[o + 3] = Math.round(190 * t);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  DENS = cv;
+}
+
+function fspawn(p) {
+  const r = Math.random() * FACC;
+  let lo = 0, hi = FCUM.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (FCUM[mid] < r) { lo = mid + 1; } else { hi = mid; } }
+  const q = Math.floor(lo / F_BINS);
+  p.b = lo % F_BINS;
+  p.x = FB.w + (q % FGW + Math.random()) * FD_LON;
+  p.y = FB.s + (Math.floor(q / FGW) + Math.random()) * FD_LAT;
+  p.trail = []; p.age = 0; p.life = 50 + Math.random() * 90; p.t = 0; p.c = null;
+}
+
+function fadvance() {
+  const NS = FSECN.length;
+  for (const p of FPARTS) {
+    const i = Math.floor((p.x - FB.w) / FD_LON), j = Math.floor((p.y - FB.s) / FD_LAT);
+    if (i < 0 || j < 0 || i >= FGW || j >= FGH || p.age > p.life) { fspawn(p); continue; }
+    const q = j * FGW + i, b = p.b, m = FM[b][q], sx = FVX[b][q], sy = FVY[b][q], L = Math.hypot(sx, sy);
+    if (m <= FMAX * 1e-5 || L <= 0) { fspawn(p); continue; }
+    const ux = sx / L, uy = sy / L, step = FD_LAT * (0.15 + 0.3 * (L / m));
+    p.x += ux * step * FD_LON / FD_LAT; p.y += uy * step;
+    // Tracé décalé à droite du sens de marche : les deux sens côte à côte.
+    p.trail.push([p.x + uy * F_LANE * FD_LON / FD_LAT, p.y - ux * F_LANE, ROAD_Z + 8]);
+    if (p.trail.length > F_TRAIL) { p.trail.shift(); }
+    p.t = Math.log(1 + m) / Math.log(1 + FMAX);
+    let best = -1, bv = 0;
+    for (let k = 0; k < NS; k++) { const w = FSEC[(q * F_BINS + b) * NS + k]; if (w > bv) { bv = w; best = k; } }
+    p.c = best >= 0 ? FSECRGB[best] : [150, 150, 150];
+    p.age++;
+  }
+}
+
+const F_LOW = [110, 80, 20], F_MID = [247, 181, 0], F_HIGH = [255, 246, 216];
+function fAmber(t) {
+  const [a, b, u] = t < 0.6 ? [F_LOW, F_MID, t / 0.6] : [F_MID, F_HIGH, (t - 0.6) / 0.4];
+  return a.map((x, k) => Math.round(x + (b[k] - x) * u));
+}
+/* Couleur du cap : est ambre, nord cyan, ouest rose, sud vert ; la
+   luminosité suit le volume. Vers Manhattan depuis le Queens = rose. */
+const F_CAP = [[255, 170, 60], [90, 200, 255], [255, 105, 170], [140, 230, 140]];
+function fCap(h, t) {
+  const x = ((h / (Math.PI / 2)) % 4 + 4) % 4, k = Math.floor(x), u = x - k;
+  const a = F_CAP[k], b = F_CAP[(k + 1) % 4], k2 = 0.35 + 0.65 * t;
+  return a.map((c, n) => Math.round((c + (b[n] - c) * u) * k2));
+}
+
+function flowLayer() {
+  if (FLOWMODE !== FLOWKEY) { FLOWKEY = FLOWMODE; flowKey(); }
+  /* Construit au premier dessin : les aéroports (AIRNODE) sont alors connus. */
+  if (!FSEC && DIR.length && AIRNODE) { buildField(); flowKey(); }
+  if (!FPARTS.length) { return []; }
+  fadvance(); FTICK++;
+  const CT = 1000;
+  const out = [];
+  if (FLOWMODE === "dens" && DENS) {
+    out.push(new deck.BitmapLayer({
+      id: "flow-dens", image: DENS, bounds: [FB.w, FB.s, FB.e, FB.n],
+      parameters: { depthTest: false },
+    }));
+  }
+  out.push(new deck.TripsLayer({
+    id: "flow-currents", pickable: false,
+    data: FPARTS.filter(p => p.trail.length > 1),
+    getPath: p => p.trail,
+    getTimestamps: p => p.trail.map((_, k) => CT - (p.trail.length - 1 - k)),
+    getColor: p => fAmber(p.t).concat([Math.round(255 * DOSES[DOSE].a * (0.35 + 0.65 * p.t))]),
+    getWidth: p => DOSES[DOSE].w * (1 + 1.6 * p.t), widthUnits: "pixels", widthMinPixels: 0.8,
+    capRounded: true, jointRounded: true, fadeTrail: true,
+    trailLength: F_TRAIL, currentTime: CT,
+    updateTriggers: { getPath: FTICK, getTimestamps: FTICK, getColor: [FTICK, DOSE], getWidth: [FTICK, DOSE] },
+    /* Mélange additif pour l'ambre seulement : en couleurs de quartier, il
+       blanchissait tout Manhattan et la teinte disparaissait. */
+    parameters: NIGHT && FLOWMODE !== "cap"
+      ? { depthTest: false, blend: true, blendFunc: [0x0302, 1, 1, 1], blendEquation: 0x8006 }
+      : { depthTest: false },
   }));
-  /* L'ombre portée du taxi : un disque sombre à même la chaussée. Sans
-     elle la voiture flotte, puisque rien d'autre sur la carte n'a
-     d'épaisseur à cet endroit. */
-  out.push(new deck.ScatterplotLayer({
-    id: "ride-puck", data: RIDE.cars, pickable: false,
-    getPosition: d => d.p,
-    radiusUnits: "pixels", getRadius: TAXI_BOX * 0.52,
-    stroked: false, filled: true,
-    getFillColor: [8, 7, 11, 150],
+  return out;
+}
+function flowKey() {
+  const el = document.getElementById("flowkey");
+  if (!el) { return; }
+  el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed",
+    b.dataset.d ? b.dataset.d === DOSE : +b.dataset.v === PITCH));
+  el.querySelector(".fk-scale").innerHTML =
+    '<i style="background:linear-gradient(90deg,rgb(' + F_LOW + '),rgb(' + F_MID + '),rgb(' + F_HIGH + '))"></i><span>peu → beaucoup de courses</span>';
+}
+const LABEL_LIFT = 3200;
+function labelLeaders() {
+  const pts = SECTORS.map(a => LABEL_POS[a] || CITY.lonlat[a])
+    .concat(AIRPORTS.map(d => [d.lon, d.lat, d.rgb]));
+  return new deck.LineLayer({
+    id: "label-leaders", data: pts, pickable: false,
+    getSourcePosition: p => [p[0], p[1], ROAD_Z],
+    getTargetPosition: p => [p[0], p[1], ALT + LABEL_LIFT - 120],
+    /* Gris pour les quartiers, bleu de l'aéroport pour LGA et JFK. */
+    getColor: p => p[2] ? p[2].concat([220]) : (NIGHT ? [165, 160, 152, 200] : [120, 116, 110, 170]),
+    getWidth: 1, widthUnits: "pixels",
     parameters: { depthTest: false },
-    updateTriggers: { getPosition: RIDE.cars },
-  }));
-  /* La silhouette, d'un seul tenant. Ses facettes prennent la lumière de
-     la scène, comme les toits des tours : le relief ne vient que de là. */
-  out.push(new deck.SimpleMeshLayer({
-    id: "cars", data: RIDE.cars, mesh: TAXI_HULL, pickable: false,
-    getPosition: d => d.p, getOrientation: d => [0, d.a, 0],
-    getColor: [227, 168, 26, 236], sizeScale: TAXI_SCALE,
-    material: { ambient: 0.58, diffuse: 0.64, shininess: 24,
-                specularColor: [60, 52, 30] },
-    /* Le test de profondeur est rallumé pour la voiture, et pour elle
-       seule : sans lui, les faces arrière et les roues se peignaient
-       par-dessus la carrosserie et il ne restait qu'une tache. */
-    parameters: { depthTest: true, depthMask: true },
-    updateTriggers: { getPosition: RIDE.cars, getOrientation: RIDE.cars },
-  }));
+  });
+}
+function layers() {
+  /* Plus de taxi qui roule : les chevrons et la voiture laissent la place
+     à la masse fixe de toutes les courses. */
+  const drop = ['dests', 'focus-halo', 'focus', 'focus-edge', 'air-ring'], names = ['zone-text', 'air-text'];
+  const out = STATIC.filter(l => !drop.includes(l.id) && !names.includes(l.id));
+  if (OD.length) { out.push(...flowLayer()); }
+  /* Les noms montent au-dessus des courants, reliés au sol par un trait
+     gris : sans cela les lignes jaunes passaient dessus et on ne les lisait
+     plus. */
+  out.push(labelLeaders());
+  out.push(...STATIC.filter(l => names.includes(l.id)));
   return out;
 }
 
@@ -5411,7 +5628,8 @@ function fitted() {
   /* Les nœuds d'aéroport entrent dans l'emprise : JFK est à l'est du Queens,
      et sans lui dans le calcul les taxis qui s'y posent tombaient hors
      cadre. Le cadrage recule de quelques pour cent, c'est le prix. */
-  const pts = SECTORS.map(a => CITY.lonlat[a])
+  const pts = SECTORS.filter(a => !['Bronx', 'Staten Island', 'EWR'].includes(CITY.order[a]))
+                     .map(a => CITY.lonlat[a])
                      .concat(AIRNODE.map(d => d.lonlat));
   for (const c of pts) {
     if (c[0] < w) { w = c[0]; }
@@ -5423,7 +5641,32 @@ function fitted() {
   w -= mx; e += mx; s -= my; n += my;
   VIEWSTATE = { longitude: (w + e) / 2 - 0.022, latitude: (s + n) / 2 - 0.008,
                 zoom: Math.log2(0.98 * W * 360 / (512 * (e - w))),
-                pitch: 54, bearing: VIEWBEAR };
+                pitch: PITCH, bearing: VIEWBEAR };
+  /* Le calcul ci-dessus ne regarde que la largeur. Depuis que le bloc suit
+     la hauteur de l'écran, il est plus large que haut et JFK, devenu un
+     départ qu'on survole, tombait sous le bord inférieur. À chaque tour, la
+     vue est recentrée sur les nœuds dans le cadre utile (titre et clé
+     déduits), puis reculée d'un cran tant qu'un nœud en sort. Recentrer
+     d'abord évite de reculer pour rien : la vue laissait un bandeau vide
+     en haut. */
+  /* En haut, la place d'une pastille : elle se pose au-dessus de son nœud,
+     et les nœuds du nord la poussaient sous le titre. */
+  const H = el.clientHeight || 400, M = 26;
+  const top = HEAD + 70, bot = H - LEGH - M;
+  for (let k = 0; k < 80; k++) {
+    const vp = new deck.WebMercatorViewport({ ...VIEWSTATE, width: W,
+                                              height: H });
+    const q = pts.map(c => vp.project([c[0], c[1], ROAD_Z]));
+    const xs = q.map(v => v[0]), ys = q.map(v => v[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const c = vp.unproject([W / 2 + (x0 + x1) / 2 - W / 2,
+                            H / 2 + (y0 + y1) / 2 - (top + bot) / 2]);
+    VIEWSTATE.longitude = c[0];
+    VIEWSTATE.latitude = c[1];
+    if (x1 - x0 < W - 2 * M && y1 - y0 < bot - top) { break; }
+    VIEWSTATE.zoom -= 0.04;
+  }
   return VIEWSTATE;
 }
 
@@ -5443,9 +5686,55 @@ const SHORT = ["Downtown", "Midtown", "Uptown", "Harlem", "Queens",
 
 async function boot() {
   CITY = await (await fetch(staticUrl("nyc_city.json"))).json();
-  try {
-    ROADS = await (await fetch(staticUrl("nyc_routes.json"))).json();
-  } catch (e) { ROADS = {}; }
+  /* Tous les trajets zone à zone, moyenne de la période : [origine,
+     destination, courses/h, durée médiane en minutes]. */
+  { const fl = await (await fetch(staticUrl("nyc_flows.json"))).json();
+    ZC = fl.zc; OD = fl.od; }
+  /* Les points voyagent dans le sens des courses : un jeu par trajet
+     orienté. Un gros flux a des points plus gros et plus nombreux ; le
+     temps du parcours suit la durée médiane comptée du trajet, donc un
+     point lent est un trajet long. */
+  DIR = OD.filter(f => f[0] !== f[1] && ZC[f[0]] && ZC[f[1]]);
+  DMAX = Math.max(...DIR.map(f => f[2]));
+  /* Chaque course devient une comète : une tête nette et une traîne qui
+     s'efface, dessinées par le GPU (TripsLayer). Le nombre de comètes par
+     boucle suit le débit ; leur temps de parcours suit la durée médiane du
+     trajet, donc une comète lente est une course longue. */
+  for (const f of DIR) {
+    const share = Math.sqrt(f[2] / DMAX);
+    /* Plus lent qu'avant : des étincelles filaient trop vite pour se lire
+       comme une circulation. */
+    const T = Math.max(3.5, Math.min(30, f[3] * 0.6));
+    /* Comètes par boucle proportionnelles aux courses : sous une comète,
+       le trajet est tiré au sort à hauteur de son poids. Une paire à une
+       course par mois n'apparaît presque jamais, comme dans la rue. */
+    const want = 0.25 * f[2] * LOOP;
+    const n = Math.floor(want) + (Math.random() < want % 1 ? 1 : 0);
+    const a = ZC[f[0]], b = ZC[f[1]];
+    const path = [[a[0], a[1], ROAD_Z + 10], [b[0], b[1], ROAD_Z + 10]];
+    const off = Math.random();
+    for (let k = 0; k < n; k++) {
+      /* Départs réguliers, pas au hasard : une file de taxis espacés, pas
+         un crépitement. Seul le décalage d'ensemble est tiré. */
+      const t0 = ((k + 0.5) / n + off) % 1 * LOOP;
+      const w = 0.9 + 1.7 * share;
+      PARTS.push({ f: f, a: a, path: path, ts: [t0, t0 + T], w: w, k: k });
+      /* La comète qui chevauche la fin de boucle repart aussi au début. */
+      if (t0 + T > LOOP) { PARTS.push({ f: f, a: a, path: path, ts: [t0 - LOOP, t0 - LOOP + T], w: w, k: k }); }
+    }
+  }
+  /* Une ligne par paire de zones : l'aller et le retour sont additionnés,
+     la durée est la moyenne de leurs médianes pondérée par les courses. */
+  const pair = {};
+  for (const f of OD) {
+    if (f[0] === f[1] || !ZC[f[0]] || !ZC[f[1]]) { continue; }
+    const k = f[0] < f[1] ? f[0] + "-" + f[1] : f[1] + "-" + f[0];
+    const q = pair[k] || (pair[k] = [Math.min(f[0], f[1]), Math.max(f[0], f[1]), 0, 0]);
+    q[2] += f[2]; q[3] += f[2] * f[3];
+  }
+  OD = Object.values(pair).map(q => [q[0], q[1], q[2], q[3] / q[2]])
+             .sort((x, y) => x[2] - y[2]);
+  VMAX = Math.max(...OD.map(f => f[2]));
   TINT = CITY.order.map(name => {
     const c = rgb(META.areaColors[name] || C.dim);
     return [SLAB[0] + (c[0] - SLAB[0]) * MUTE,
@@ -5457,14 +5746,11 @@ async function boot() {
     SCENE_BG[1] + (c[1] - SCENE_BG[1]) * GROUND_A,
     SCENE_BG[2] + (c[2] - SCENE_BG[2]) * GROUND_A]);
   SPACED = SHORT.map(n => n.toUpperCase().split("").join(" "));
-  AIRPORTS = META.zones
-    .filter(z => AIR_CODE[z.name])
-    .map(z => ({ code: AIR_CODE[z.name], lon: z.lon, lat: z.lat }));
-  AIR_RGB = rgb((META.areaColors || {})["Airports"] || C.dim);
-  if (CITY.air) {
-    AIRSEC = CITY.air.sector;
-    AIRNODE = CITY.air.node;
-  }
+  AIRNODE = (CITY.air && CITY.air.node) || [];
+  AIRS = AIRNODE.map((n, k) => CITY.lonlat.length + k);
+  AIRPORTS = AIRNODE.map((n, k) => ({
+    code: n.code, lon: n.lonlat[0], lat: n.lonlat[1], s: AIRS[k],
+    rgb: rgb((META.areaColors || {})[n.area] || C.dim) }));
   fatten();
   deckgl = new deck.DeckGL({
     container: "city",

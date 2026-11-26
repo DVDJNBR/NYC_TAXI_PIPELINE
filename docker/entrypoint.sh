@@ -69,6 +69,10 @@ if len(steps) != 7:
 O = '/app/data/aggregates/od_cycle.parquet'
 if not {'MED_MINUTES', 'AVG_MINUTES'} <= set(pq.read_schema(O).names):
     sys.exit(1)
+# JFK et LaGuardia sont deux secteurs depuis la fin de « Airports ».
+a = pq.read_table(O, columns=['PU_AREA'])['PU_AREA']
+if not pc.any(pc.equal(a, 'JFK')).as_py():
+    sys.exit(1)
 sys.exit(0)
 " 2>/dev/null; then
     echo "Les cycles sont d'une version antérieure — reconstruction."
@@ -92,7 +96,7 @@ fi
 # fait foi, une copie laissée par un conteneur précédent peut être périmée.
 mkdir -p /app/static
 cp -f /app/data/reference/nyc_city.json /app/static/nyc_city.json 2>/dev/null || true
-cp -f /app/data/reference/nyc_routes.json /app/static/nyc_routes.json 2>/dev/null || true
+cp -f /app/data/reference/nyc_flows.json /app/static/nyc_flows.json 2>/dev/null || true
 
 # Pré-calcul du dashboard avant d'accepter des visiteurs. Sans lui, le premier
 # visiteur après chaque démarrage attendait que meta() écrive static/

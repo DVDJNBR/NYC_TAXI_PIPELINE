@@ -77,21 +77,25 @@ MANHATTAN_BANDS = [
     (float("inf"), "Harlem & North"),
 ]
 
-# Les trois aéroports forment leur propre secteur. Dans le référentiel TLC
-# ce sont des zones ordinaires : JFK et LaGuardia tombent dans le Queens,
-# Newark dans sa propre valeur de service. Fondus dans leur arrondissement,
-# ils disparaissaient d'un diagramme où ils pèsent 7 % des courses — et ces
-# 7 % ne ressemblent à rien d'autre. Un vol n'est pas un déplacement urbain :
-# il part d'un point unique, à heure fixe, vers toute la ville.
-AIRPORT_AREA = "Airports"
-AIRPORT_IDS = {132: "Airports", 138: "Airports", 1: "Airports"}
+# JFK et LaGuardia sont chacun un secteur. Dans le référentiel TLC ce sont
+# des zones ordinaires du Queens ; fondus dans leur arrondissement, ils
+# disparaissaient d'un diagramme où ils pèsent 7 % des courses. Un temps
+# réunis en un seul secteur « Airports », ils sont séparés : à 5 119 et
+# 3 382 courses à l'heure sur la journée, chacun pèse plus que le Bronx, et
+# ils sont à quinze kilomètres l'un de l'autre — un secteur commun n'avait
+# pas de centre.
+# Newark n'est pas un secteur : trois courses sur la période, les taxis
+# jaunes n'y chargent pas. Sa zone garde son arrondissement « EWR », hors
+# de AREAS, donc hors des flux.
+AIRPORT_IDS = {JFK: "JFK", LGA: "LaGuardia"}
+AIRPORT_AREAS = tuple(AIRPORT_IDS.values())
 
 # Ordre des secteurs : Manhattan du sud au nord, puis les autres
 # arrondissements par volume, et les aéroports en dernier. C'est lui qui
 # range les nœuds du diagramme de flux, où une suite géographique se suit
 # mieux qu'un classement.
 AREAS = [band for _, band in MANHATTAN_BANDS] + [
-    "Queens", "Brooklyn", "Bronx", "Staten Island", AIRPORT_AREA,
+    "Queens", "Brooklyn", "Bronx", "Staten Island", *AIRPORT_AREAS,
 ]
 
 # Les quatre bandes de Manhattan prennent la même matière — l'or de la marque —
@@ -106,15 +110,16 @@ AREAS = [band for _, band in MANHATTAN_BANDS] + [
 # non quatre. Les couleurs vives restent aux arrondissements voisins, qui
 # sont petits : c'est là qu'elles servent à distinguer.
 #
-# Les aéroports prennent un bleu-vert franc, la seule teinte saturée du jeu :
-# ils sont 7 % des courses et doivent se repérer d'un coup d'œil, sur le
+# Les aéroports prennent un bleu-vert franc, la seule teinte saturée du jeu,
+# en deux valeurs, JFK la plus sombre : ils sont 7 % des courses et doivent se repérer d'un coup d'œil, sur le
 # ruban comme sur la carte, où ce sont eux qui portent les repères.
 AREA_COLORS = {
     "Downtown": "#585560",
     "Midtown": "#7e7a82",
     "Uptown": "#a8a29f",
     "Harlem & North": "#cfc8be",
-    AIRPORT_AREA: "#2f7d8c",
+    "JFK": "#2f7d8c",
+    "LaGuardia": "#5ea9b5",
     **{b: c for b, c in BOROUGH_COLORS.items()
        if b not in ("Manhattan", "EWR")},
 }

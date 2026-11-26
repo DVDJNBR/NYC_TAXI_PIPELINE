@@ -22,13 +22,20 @@ Deux corrections sont faites ici, et c'est pourquoi le script existe :
    sur l'année contre 33 sur la semaine. La division appartient au builder,
    où tous les consommateurs en profitent.
 
-2. Les aéroports étaient invisibles. `od_cycle` les sépare en un secteur
-   « Airports », mais la maquette n'avait de vivier de points qu'à Newark,
+2. Les aéroports étaient invisibles. `od_cycle` les sépare du Queens, mais la maquette n'avait de vivier de points qu'à Newark,
    où les taxis jaunes ne chargent jamais (3 courses sur la période, contre
    5 119 à JFK et 3 382 à LaGuardia). Les 7 à 10 % de courses qui touchent
    un aéroport se posaient donc à Newark ou nulle part. Ce script ajoute un
-   vivier pour JFK et un pour LaGuardia, et la part de chacun à chaque pas :
-   elle bouge beaucoup — JFK prend 97 % des départs à 5 h et 40 % à 10 h.
+   vivier et un nœud pour JFK et pour LaGuardia, qui sont chacun un secteur
+   des agrégats.
+
+3. La carte ne dessine plus les flux secteur à secteur mais un champ de
+   courants, calculé dans le navigateur à partir de tous les trajets zone à
+   zone. Ce script les écrit dans `data/reference/nyc_flows.json` : pour
+   chaque couple (départ, arrivée) de zones distinctes, les courses par
+   heure en moyenne sur la période et la durée médiane ; pour chaque zone,
+   son centroïde et son secteur. Ce sont les Parquet bruts qui sont lus, les
+   agrégats de J s'arrêtant au secteur.
 
     PYTHONPATH=. .venv/bin/python scripts/K_city_trips.py
 """
@@ -40,11 +47,13 @@ import random
 import duckdb
 
 import nyc_zones
+import J_build_cycles as J
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OD = ROOT / "data" / "aggregates" / "od_cycle.parquet"
 ZONES = ROOT / "data" / "reference" / "taxi_zones.json"
 CITY = ROOT / "data" / "reference" / "nyc_city.json"
+FLOWS = ROOT / "data" / "reference" / "nyc_flows.json"
 
 # Le nombre de pas par cycle, à tenir d'accord avec STEPS de
 # J_build_cycles.py et CYCLES de nyc_live.py.
@@ -148,37 +157,34 @@ def matrices(con) -> dict:
     return out
 
 
-def air_share(con) -> dict:
-    """La part de JFK et de LaGuardia dans les courses d'aéroport, par pas.
+def zone_flows(con, zones: dict) -> dict:
+    """Tous les trajets zone à zone, pour le champ de courants de la carte.
 
-    Mesurée au départ, faute d'avoir la zone d'arrivée dans `od_cycle`, et
-    appliquée aux deux sens. Le but est de poser les taxis là où ils doivent
-    être pour que la densité se lise, pas de répartir au trajet près.
+    Courses par heure : le compte de la paire divisé par les heures de la
+    période, comme les cycles de J. Durée : la médiane des courses de la
+    paire, en minutes. Les trajets internes à une zone sont gardés à part du
+    calcul côté navigateur, qui les ignore faute de direction.
     """
-    Z = (ROOT / "data" / "aggregates" / "zone_cycle.parquet").as_posix()
-    ids = tuple(z for z, _ in AIR)
-    out = {}
-    for scope, steps in CYCLES.items():
-        rows = con.execute(f"""
-            SELECT STEP, ZONE_ID, sum(TOTAL_TRIPS)
-            FROM read_parquet('{Z}')
-            WHERE SCOPE = '{scope}' AND ZONE_ID IN {ids}
-            GROUP BY 1, 2
-        """).fetchall()
-        per = [[0.0] * len(AIR) for _ in range(steps)]
-        order = {z: i for i, (z, _) in enumerate(AIR)}
-        for step, zid, v in rows:
-            if step < steps:
-                per[step][order[zid]] += float(v)
-        res = []
-        for row in per:
-            tot = sum(row)
-            if tot <= 0:
-                res.append([1.0 / len(AIR)] * len(AIR))
-            else:
-                res.append([round(v / tot, 4) for v in row])
-        out[scope] = res
-    return out
+    days = J.denominators()
+    hours = int(days[(days.SCOPE == "hour") & (days.STEP == 0)].DAYS.iloc[0]) * 24
+    rows = con.execute(f"""
+        SELECT PULocationID::INT, DOLocationID::INT, count(*),
+               median(date_diff('second', tpep_pickup_datetime,
+                                tpep_dropoff_datetime)) / 60.0
+        FROM read_parquet('{J.RAW.as_posix()}', union_by_name = true)
+        WHERE {J.CLEAN}
+          AND PULocationID BETWEEN 1 AND 263
+          AND DOLocationID BETWEEN 1 AND 263
+          AND PULocationID <> DOLocationID
+        GROUP BY 1, 2
+    """).fetchall()
+    area = nyc_zones.areas()
+    zc = {str(z): [round(float(zones[z]["lon"]), 4), round(float(zones[z]["lat"]), 4),
+                   area.get(z, "EWR")]
+          for z in zones}
+    od = [[o, d, round(n / hours, 4), round(m, 1)]
+          for o, d, n, m in rows if str(o) in zc and str(d) in zc]
+    return {"zc": zc, "od": od}
 
 
 def main() -> None:
@@ -199,7 +205,7 @@ def main() -> None:
     # et les indices écrits dans city["air"] désignaient les derniers, laissant
     # les premiers dans le fichier sans que rien ne les lise. Le script doit
     # pouvoir tourner deux fois de suite et rendre le même fichier.
-    city["pools"]["pt"] = city["pools"]["pt"][:len(nyc_zones.AREAS)]
+    city["pools"]["pt"] = city["pools"]["pt"][:len(city["order"])]
     air = []
     for zid, code in AIR:
         z = zones[zid]
@@ -211,11 +217,18 @@ def main() -> None:
         city["pools"]["pt"].append(flat)
         air.append({"code": code, "lonlat": [z["lon"], z["lat"]],
                     "pool": len(city["pools"]["pt"]) - 1})
-    city["air"] = {"node": air,
-                   "sector": nyc_zones.AREAS.index(nyc_zones.AIRPORT_AREA),
-                   "share": air_share(con)}
+    # Chaque nœud porte le nom de son secteur dans les agrégats : la carte
+    # le relie aux flux par ce nom, comme les neuf secteurs de la maquette.
+    names = dict(zip((z for z, _ in AIR), nyc_zones.AIRPORT_AREAS))
+    for n, (zid, _) in zip(air, AIR):
+        n["area"] = names[zid]
+    city["air"] = {"node": air}
 
     CITY.write_text(json.dumps(city, separators=(",", ":")))
+    fl = zone_flows(con, zones)
+    FLOWS.write_text(json.dumps(fl, separators=(",", ":")))
+    print(f"✓ {FLOWS.name:<18} {FLOWS.stat().st_size / 1024:.0f} ko  "
+          f"{len(fl['od'])} trajets zone à zone")
     size = CITY.stat().st_size / 1024
     print(f"✓ {CITY.name:<18} {size:.0f} ko")
     for scope, steps in CYCLES.items():
